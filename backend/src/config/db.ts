@@ -28,20 +28,22 @@ export const connectDatabase = async (uri?: string): Promise<void> => {
   const sanitizedUri = connectionUri.replace(/\/\/(.*?)@/, '//***:***@');
 
   try {
-    mongoose.connection.on('connected', () => {
-      console.log(`[Database] MongoDB connection established (${sanitizedUri})`);
-    });
+    if (mongoose.connection.listenerCount('connected') === 0) {
+      mongoose.connection.on('connected', () => {
+        console.log(`[Database] MongoDB connection established (${sanitizedUri})`);
+      });
 
-    mongoose.connection.on('error', (err) => {
-      console.error('[Database] MongoDB connection error:', err.message);
-    });
+      mongoose.connection.on('error', (err) => {
+        console.error('[Database] MongoDB connection error:', err.message);
+      });
 
-    mongoose.connection.on('disconnected', () => {
-      console.warn('[Database] MongoDB disconnected');
-    });
+      mongoose.connection.on('disconnected', () => {
+        console.warn('[Database] MongoDB disconnected');
+      });
+    }
 
     await mongoose.connect(connectionUri, {
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 15000,
       autoIndex: env.NODE_ENV !== 'production',
     });
   } catch (error: any) {

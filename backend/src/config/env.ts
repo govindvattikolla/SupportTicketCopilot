@@ -2,8 +2,16 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { z } from 'zod';
 
-// Load environment variables from .env file
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+// Load environment variables from .env file (checks backend/.env, current cwd, or repo root)
+const envPaths = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), 'backend', '.env'),
+  path.resolve(__dirname, '../../.env'),
+];
+
+for (const p of envPaths) {
+  dotenv.config({ path: p });
+}
 
 const envSchema = z.object({
   PORT: z
