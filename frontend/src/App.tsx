@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
-import { Routes, Route, Navigate, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { fetchHealthCheck, HealthCheckData } from './api/client';
+import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { Navbar } from './components/Navbar';
 import { SupportPage } from './pages/SupportPage';
@@ -10,16 +8,16 @@ import { LoginPage } from './pages/LoginPage';
 import { TicketsInboxPage } from './pages/TicketsInboxPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
 import {
-  Activity,
-  Database,
-  Server,
-  ShieldCheck,
-  RefreshCw,
-  CheckCircle2,
-  AlertTriangle,
-  ArrowRight,
-  Ticket,
   LifeBuoy,
+  Search,
+  ArrowRight,
+  ShieldCheck,
+  Headphones,
+  CheckCircle2,
+  FileText,
+  CreditCard,
+  Users,
+  Code,
 } from 'lucide-react';
 
 // Protected Route wrapper for Staff pages
@@ -30,7 +28,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return (
       <div className="max-w-xl mx-auto px-6 py-20 text-center">
         <div className="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full mx-auto mb-3"></div>
-        <p className="text-xs text-slate-400">Verifying staff workspace session...</p>
+        <p className="text-xs text-slate-400">Verifying staff session...</p>
       </div>
     );
   }
@@ -42,215 +40,194 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
-// System Health Dashboard (Home page view)
-function TelemetryDashboard() {
-  const [retryCount, setRetryCount] = useState(0);
+// Customer-Facing Help Center Home Page
+function HelpCenterHome() {
+  const [tokenInput, setTokenInput] = useState('');
+  const [inputError, setInputError] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const { user } = useAuth();
 
-  const {
-    data: health,
-    isLoading,
-    isError,
-    error,
-    refetch,
-    isFetching,
-  } = useQuery<HealthCheckData>({
-    queryKey: ['health', retryCount],
-    queryFn: fetchHealthCheck,
-    retry: 1,
-    refetchInterval: 15000,
-  });
+  const handleTrackSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = tokenInput.trim();
+    if (!cleaned) {
+      setInputError('Please enter your tracking token to look up your ticket.');
+      return;
+    }
 
-  const handleManualRefresh = () => {
-    setRetryCount((prev) => prev + 1);
-    refetch();
+    // If the customer pasted a full URL like http://.../track/:token, extract just the token
+    const tokenMatch = cleaned.match(/track\/([a-f0-9]+)/i);
+    const token = tokenMatch ? tokenMatch[1] : cleaned;
+
+    navigate(`/track/${token}`);
   };
 
   return (
-    <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
-      {/* Welcome Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-brand-950 via-slate-800 to-slate-900 p-8 border border-slate-800 shadow-2xl mb-8">
-        <div className="relative z-10 max-w-2xl">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-4">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            Phase 2 Active: Complete Ticket Lifecycle & Multi-Tenant Support
+    <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-10">
+      {/* Hero Welcome Banner */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-brand-950 via-slate-800 to-slate-900 p-8 sm:p-12 border border-slate-800 shadow-2xl mb-10 text-center">
+        <div className="max-w-3xl mx-auto">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-300 text-xs font-semibold mb-4">
+            <LifeBuoy className="w-3.5 h-3.5 text-brand-400" />
+            SupportFlow Help Desk
           </div>
-          <h2 className="text-3xl font-extrabold text-white tracking-tight mb-2">
-            SupportFlow Operational Portal
-          </h2>
-          <p className="text-slate-300 text-sm leading-relaxed mb-6">
-            Customer ticket intake, unguessable cryptographic tracking, staff assignment, role-scoped inbox, public replies, and private internal notes are live.
+
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight mb-3">
+            How can our support team assist you?
+          </h1>
+          <p className="text-slate-300 text-sm sm:text-base leading-relaxed mb-8 max-w-2xl mx-auto">
+            Submit a support ticket for technical assistance, billing questions, or bug reports. If you already submitted a request, track its real-time status below.
           </p>
 
-          <div className="flex flex-wrap gap-3">
-            <Link
-              to="/support"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-lg shadow-brand-600/30 transition"
-            >
-              <LifeBuoy className="w-4 h-4" />
-              <span>Customer Support Intake</span>
-            </Link>
+          {/* Direct Ticket Lookup Bar */}
+          <form onSubmit={handleTrackSubmit} className="max-w-xl mx-auto mb-4">
+            <div className="relative flex items-center">
+              <Search className="w-4 h-4 text-slate-500 absolute left-4" />
+              <input
+                type="text"
+                value={tokenInput}
+                onChange={(e) => {
+                  setTokenInput(e.target.value);
+                  setInputError(null);
+                }}
+                placeholder="Enter your secure tracking token (e.g. 64-character token)..."
+                className="w-full pl-11 pr-28 py-3.5 rounded-2xl bg-slate-900/90 border border-slate-700 text-slate-100 placeholder-slate-500 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition shadow-inner"
+              />
+              <button
+                type="submit"
+                className="absolute right-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs transition shadow-sm"
+              >
+                Track Ticket
+              </button>
+            </div>
+            {inputError && (
+              <p className="text-xs text-rose-400 mt-2 text-left px-2">{inputError}</p>
+            )}
+          </form>
 
-            <Link
-              to="/agent/tickets"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
-            >
-              <Ticket className="w-4 h-4 text-brand-400" />
-              <span>Staff Ticket Inbox</span>
-            </Link>
-          </div>
+          <p className="text-xs text-slate-400">
+            Received a link after submitting? You can also click the link directly in your browser.
+          </p>
         </div>
       </div>
 
-      {/* Telemetry Status Grid */}
-      <section className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-slate-200 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-brand-400" />
-            Backend & Database Telemetry
-          </h3>
-          <div className="flex items-center gap-3">
-            {health?.timestamp && (
-              <span className="text-xs text-slate-500">
-                Last ping: {new Date(health.timestamp).toLocaleTimeString()}
-              </span>
-            )}
-            <button
-              onClick={handleManualRefresh}
-              disabled={isFetching}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 text-slate-300 hover:text-white border border-slate-700 transition disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3 h-3 ${isFetching ? 'animate-spin text-brand-400' : ''}`} />
-              <span>Refresh</span>
-            </button>
+      {/* Main Action Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+        {/* Card 1: Customer Ticket Submission */}
+        <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 sm:p-8 backdrop-blur shadow-xl hover:border-slate-600 transition flex flex-col justify-between">
+          <div>
+            <div className="w-12 h-12 rounded-xl bg-brand-600/15 text-brand-400 border border-brand-500/20 flex items-center justify-center mb-4">
+              <Headphones className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Submit a Support Ticket</h2>
+            <p className="text-slate-300 text-xs sm:text-sm leading-relaxed mb-6">
+              Experiencing an issue with your account, integration, or invoices? Fill out our simple support form to receive priority assistance from an agent.
+            </p>
+            <ul className="space-y-2 mb-6 text-xs text-slate-400">
+              <li className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>No internal staff account required</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Direct tracking reference and conversation thread</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Categorized and prioritized by urgency</span>
+              </li>
+            </ul>
           </div>
+
+          <Link
+            to="/support"
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs sm:text-sm transition shadow-lg shadow-brand-600/20"
+          >
+            <span>Open New Support Ticket</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Card 1: Backend */}
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Backend API</span>
-              <Server className="w-4 h-4 text-slate-400" />
+        {/* Card 2: Staff Operations Portal */}
+        <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 sm:p-8 backdrop-blur shadow-xl hover:border-slate-600 transition flex flex-col justify-between">
+          <div>
+            <div className="w-12 h-12 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/20 flex items-center justify-center mb-4">
+              <ShieldCheck className="w-6 h-6" />
             </div>
-            <div className="flex items-center gap-2">
-              {isLoading ? (
-                <span className="text-sm text-slate-400 animate-pulse">Connecting...</span>
-              ) : isError ? (
-                <div className="flex items-center gap-2 text-rose-400 font-semibold text-base">
-                  <AlertTriangle className="w-4 h-4" />
-                  Offline
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-emerald-400 font-semibold text-base">
-                  <CheckCircle2 className="w-4 h-4" />
-                  Online ({health?.service})
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-slate-500 mt-2">Express HTTP server on port 5000</p>
+            <h2 className="text-xl font-bold text-white mb-2">Staff Operations Portal</h2>
+            <p className="text-slate-300 text-xs sm:text-sm leading-relaxed mb-6">
+              Workspace administrators, support leads, and agents can sign in to view the ticket queue, assign tickets, manage statuses, and collaborate.
+            </p>
+            <ul className="space-y-2 mb-6 text-xs text-slate-400">
+              <li className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-brand-400 shrink-0" />
+                <span>Centralized inbox with real-time status transitions</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-brand-400 shrink-0" />
+                <span>Customer replies & confidential internal notes</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-brand-400 shrink-0" />
+                <span>Multi-tenant workspace isolation & audit logs</span>
+              </li>
+            </ul>
           </div>
 
-          {/* Card 2: Database */}
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Database</span>
-              <Database className="w-4 h-4 text-slate-400" />
-            </div>
-            <div className="flex items-center gap-2">
-              {isLoading ? (
-                <span className="text-sm text-slate-400 animate-pulse">Querying...</span>
-              ) : isError ? (
-                <div className="flex items-center gap-2 text-slate-400 font-semibold text-base">
-                  <AlertTriangle className="w-4 h-4 text-amber-400" />
-                  Awaiting
-                </div>
-              ) : health?.database.healthy ? (
-                <div className="flex items-center gap-2 text-emerald-400 font-semibold text-base">
-                  <CheckCircle2 className="w-4 h-4" />
-                  Connected
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-amber-400 font-semibold text-base">
-                  <AlertTriangle className="w-4 h-4" />
-                  {health?.database.status.toUpperCase()}
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-slate-500 mt-2">MongoDB Atlas: {health?.database.status}</p>
-          </div>
-
-          {/* Card 3: Environment */}
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Environment</span>
-              <span className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300 font-mono">
-                {health?.environment || 'development'}
-              </span>
-            </div>
-            <div className="text-base font-semibold text-slate-200">
-              React 18 + Node.js 20
-            </div>
-            <p className="text-xs text-slate-500 mt-2">TanStack Query + Tailwind CSS</p>
-          </div>
-
-          {/* Card 4: Uptime */}
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Uptime</span>
-              <Activity className="w-4 h-4 text-slate-400" />
-            </div>
-            <div className="text-base font-semibold text-slate-200">
-              {health ? `${health.uptime}s` : '0s'}
-            </div>
-            <p className="text-xs text-slate-500 mt-2">Monitored live via /api/health</p>
-          </div>
+          <Link
+            to={user ? '/agent/tickets' : '/login'}
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium text-xs sm:text-sm border border-slate-600 transition shadow-sm"
+          >
+            <span>{user ? 'Go to Staff Inbox' : 'Sign In as Staff'}</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
+      </div>
 
-        {isError && (
-          <div className="mt-4 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs flex items-start gap-3">
-            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+      {/* Support Categories Section */}
+      <section className="bg-slate-800/40 border border-slate-800 rounded-2xl p-6 sm:p-8">
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">
+          Common Support Categories
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-3">
+            <Code className="w-5 h-5 text-brand-400 shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold text-rose-300">Backend API could not be reached.</p>
-              <p className="mt-1 text-slate-300">
-                {error instanceof Error ? error.message : 'Ensure the backend server is running on http://localhost:5000'}
+              <h4 className="text-xs font-semibold text-slate-200">Technical & APIs</h4>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Webhooks, REST endpoints, and authentication tokens.
               </p>
             </div>
           </div>
-        )}
-      </section>
 
-      {/* Feature Highlights Card */}
-      <section className="bg-slate-800/40 border border-slate-800 rounded-xl p-6">
-        <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-4">
-          Phase 2 Implemented Workflows
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-400">
-          <div className="p-4 rounded-lg bg-slate-900/60 border border-slate-800">
-            <h4 className="font-semibold text-slate-200 mb-1 flex items-center gap-1.5">
-              <ArrowRight className="w-3.5 h-3.5 text-brand-400" />
-              Public Ticket Intake
-            </h4>
-            <p className="text-slate-400">
-              Customers submit requests without accounts and receive cryptographically unguessable tracking links.
-            </p>
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-3">
+            <CreditCard className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-xs font-semibold text-slate-200">Billing & Plans</h4>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Invoices, payment updates, and subscription tiers.
+              </p>
+            </div>
           </div>
-          <div className="p-4 rounded-lg bg-slate-900/60 border border-slate-800">
-            <h4 className="font-semibold text-slate-200 mb-1 flex items-center gap-1.5">
-              <ArrowRight className="w-3.5 h-3.5 text-brand-400" />
-              Replies vs. Internal Notes
-            </h4>
-            <p className="text-slate-400">
-              Strict message separation: customers only see public replies; internal staff notes are confidential.
-            </p>
+
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-3">
+            <Users className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-xs font-semibold text-slate-200">Account Access</h4>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Team member invites, permissions, and password recovery.
+              </p>
+            </div>
           </div>
-          <div className="p-4 rounded-lg bg-slate-900/60 border border-slate-800">
-            <h4 className="font-semibold text-slate-200 mb-1 flex items-center gap-1.5">
-              <ArrowRight className="w-3.5 h-3.5 text-brand-400" />
-              Validated State Machine
-            </h4>
-            <p className="text-slate-400">
-              Strict ticket lifecycle enforcement with automatic customer reopen triggers and immutable audit logging.
-            </p>
+
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-3">
+            <FileText className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-xs font-semibold text-slate-200">General Questions</h4>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Product guidance, documentation, and feature requests.
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -264,7 +241,7 @@ export function App() {
       <Navbar />
 
       <Routes>
-        <Route path="/" element={<TelemetryDashboard />} />
+        <Route path="/" element={<HelpCenterHome />} />
         <Route path="/support" element={<SupportPage />} />
         <Route path="/track/:token" element={<TrackTicketPage />} />
         <Route path="/login" element={<LoginPage />} />
@@ -288,7 +265,7 @@ export function App() {
       </Routes>
 
       <footer className="border-t border-slate-800 py-4 px-6 text-center text-xs text-slate-500 mt-auto">
-        SupportFlow — Phase 2 Production Ticket Lifecycle • Modular Monolith Architecture
+        SupportFlow Customer Support Operations Platform • All rights reserved
       </footer>
     </div>
   );

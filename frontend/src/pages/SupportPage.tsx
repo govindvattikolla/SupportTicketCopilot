@@ -227,7 +227,7 @@ export const SupportPage: React.FC = () => {
           <div className="pt-2 flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-xs text-slate-500">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Secure 32-byte tracking token issued upon creation</span>
+              <span>A secure tracking reference will be generated for your request</span>
             </div>
 
             <button

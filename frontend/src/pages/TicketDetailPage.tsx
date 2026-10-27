@@ -96,7 +96,7 @@ export const TicketDetailPage: React.FC = () => {
     return (
       <div className="max-w-6xl mx-auto px-6 py-20 text-center">
         <div className="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full mx-auto mb-3"></div>
-        <p className="text-xs text-slate-400">Loading ticket workspace details...</p>
+        <p className="text-xs text-slate-400">Loading ticket details...</p>
       </div>
     );
   }
@@ -148,7 +148,7 @@ export const TicketDetailPage: React.FC = () => {
           rel="noreferrer"
           className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 font-medium transition"
         >
-          <span>View Customer Portal View</span>
+          <span>Open Customer View</span>
           <ExternalLink className="w-3.5 h-3.5" />
         </a>
       </div>
@@ -475,7 +475,7 @@ export const TicketDetailPage: React.FC = () => {
           <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
               <History className="w-3.5 h-3.5 text-brand-400" />
-              <span>Immutable Audit Trail</span>
+              <span>Activity & Audit History</span>
             </h3>
 
             <div className="space-y-3 text-xs max-h-96 overflow-y-auto pr-1">
