@@ -1,6 +1,6 @@
 import http from 'http';
 import { createApp } from './app';
-import { connectDatabase, closeDatabase } from './config/db';
+import { connectDatabase, closeDatabase, getDatabaseStatus } from './config/db';
 import { env } from './config/env';
 
 const startServer = async (): Promise<void> => {
@@ -13,6 +13,7 @@ const startServer = async (): Promise<void> => {
   } catch (error: any) {
     console.error('Initial database connection failed. Server will continue with degraded health status.');
   }
+  console.log(`[Server] Database connection status: ${getDatabaseStatus()}`);
 
   server.listen(env.PORT, () => {
     console.log(`
