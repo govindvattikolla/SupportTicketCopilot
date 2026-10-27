@@ -32,6 +32,12 @@ const envSchema = z.object({
   CLIENT_URL: z
     .string()
     .default('http://localhost:5173'),
+  JWT_SECRET: z
+    .string()
+    .default('supportflow_super_secret_jwt_key_2026'),
+  JWT_EXPIRES_IN: z
+    .string()
+    .default('7d'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
@@ -54,4 +60,6 @@ export const env = parsedEnv.success
       NODE_ENV: 'test' as const,
       MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/supportflow_test',
       CLIENT_URL: 'http://localhost:5173',
+      JWT_SECRET: process.env.JWT_SECRET || 'supportflow_super_secret_jwt_key_2026',
+      JWT_EXPIRES_IN: '7d',
     };

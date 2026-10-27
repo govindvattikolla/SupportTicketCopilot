@@ -13,6 +13,7 @@
     "dev:frontend": "npm run dev --workspace=frontend",
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
     "test": "npm run test --workspace=backend",
+    "seed": "npm run seed --workspace=backend",
     "typecheck": "npm run typecheck --workspace=backend && npm run typecheck --workspace=frontend",
     "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend"
   },
