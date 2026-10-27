@@ -1,0 +1,196 @@
+================================================================================
+SUPPORTFLOW - PHASE 2 IMPLEMENTATION REVIEW & ARCHITECTURE SPECIFICATION
+================================================================================
+Generated: 2026-10-27
+Author: SupportFlow Engineering Team
+Phase: Phase 2 - Ticket Lifecycle, Conversations, Tracking & Staff Operations
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Phase 2 establishes the complete end-to-end operational ticket workflow for
+SupportFlow. It bridges public customer interactions (intake and unguessable
+token tracking) with staff workspace management (role-based inbox, state
+machine status transitions, assignments, public replies vs. confidential
+internal notes, and immutable audit trails).
+
+All 10 Phase 2 user-flow requirements and acceptance criteria have been built,
+verified with automated integration tests (13/13 passing in Vitest), and
+seeded with realistic data into MongoDB Atlas.
+
+--------------------------------------------------------------------------------
+2. END-TO-END DATA FLOW (FRONTEND -> EXPRESS API -> SERVICE -> MONGO -> RESPONSE)
+--------------------------------------------------------------------------------
+
+A. Public Customer Ticket Submission Flow:
+   1. Frontend (`/support`): Customer fills in Name, Email, Subject, Category,
+      Urgency, and Description. React state validates non-empty inputs.
+   2. API Client (`apiClient`): Dispatches POST to `/api/public/tickets`.
+   3. Express Middleware: Rate limiter (`express-rate-limit`) checks IP quota
+      (100 req / 15 min).
+   4. Controller (`submitPublicTicket`): Zod schema (`createTicketSchema`) parses
+      and sanitizes string lengths and email format.
+   5. Service Layer (`createPublicTicket`):
+      - Locates active workspace.
+      - Atomically increments `workspace.ticketCounter` ($inc) to yield `TCK-XXXX`.
+      - Generates cryptographically secure 32-byte hex token (`trackingToken`).
+      - Persists new `Ticket` document with status 'open'.
+      - Writes initial `AuditEvent` ('ticket_created').
+   6. Response: Standardized envelope returns `{ success: true, data: { ticketNumber, trackingToken, trackingUrl } }` with HTTP 201 Created.
+   7. Frontend UI: Displays confirmation with direct one-click link to `/track/:token`.
+
+B. Customer Ticket Tracking & Follow-up Flow:
+   1. Frontend (`/track/:token`): Calls `GET /api/public/tickets/track/:token`.
+   2. Service Layer (`getTicketByTrackingToken`):
+      - Finds ticket by indexed `trackingToken`.
+      - Queries `Message` collection strictly filtering `{ ticketId, type: 'reply' }`.
+      - Excludes any message with `type: 'internal_note'`.
+   3. Follow-up Message (`POST /api/public/tickets/track/:token/messages`):
+      - Saves message with `type: 'reply'`.
+      - Automatic Reopen Rule: If ticket status was 'resolved', automatically transitions
+        status back to 'open' and writes an audit event.
+
+C. Staff Ticket Inbox & Details Flow:
+   1. Staff Login (`POST /api/auth/login`): Verifies credentials via bcrypt, issues
+      JWT in HTTP-only cookie and JSON response body.
+   2. Staff Request Header: `Authorization: Bearer <token>` or HTTP cookie.
+   3. Auth Middleware (`authenticate`): Decodes JWT, attaches `req.user` and verified
+      `req.workspaceId`.
+   4. Staff Listing (`GET /api/tickets`):
+      - Strictly queries `{ workspaceId: req.workspaceId }` (Tenant Isolation).
+      - Applies server-side filters: status, priority, category, regex search.
+      - Applies server-side pagination: `skip((page - 1) * limit).limit(limit)`.
+   5. Staff Ticket Detail (`GET /api/tickets/:id`):
+      - Enforces `{ _id: id, workspaceId: req.workspaceId }`.
+      - Returns all messages (both public replies AND private internal notes).
+      - Returns chronological audit log.
+   6. Status Transition (`PATCH /api/tickets/:id/status`):
+      - State machine verifies permitted transitions (`open` -> `in_progress` -> `resolved` -> `closed`).
+      - Rejects invalid transitions with 400 Bad Request.
+      - Writes audit log event (`status_changed`).
+
+--------------------------------------------------------------------------------
+3. INVENTORY OF NEW & MODIFIED FILES
+--------------------------------------------------------------------------------
+
+Backend:
+- `src/types/express.d.ts`: TypeScript declaration extending Express.Request with `user` and `workspaceId`.
+- `src/shared/utils/asyncHandler.ts`: Middleware catching promise rejections from async controllers and passing to error middleware.
+- `src/modules/workspaces/workspace.model.ts`: Multi-tenant schema with `ticketCounter` and configuration.
+- `src/modules/users/user.model.ts`: Staff user schema with roles ('admin', 'lead', 'agent'), bcrypt password hashing, and compound workspace index.
+- `src/modules/tickets/ticket.model.ts`: Core lifecycle schema with customer details, reference numbers, tracking tokens, and compound indexes.
+- `src/modules/messages/message.model.ts`: Message schema with explicit `type: 'reply' | 'internal_note'` and sender metadata.
+- `src/modules/audit/audit.model.ts`: Immutable activity ledger tracking actors, actions, and previous/new states.
+- `src/modules/auth/auth.service.ts`: JWT generation, verification, and bcrypt password comparison.
+- `src/middleware/auth.ts`: Authentication guard extracting JWT and verifying active workspace membership; RBAC guard.
+- `src/modules/auth/auth.controller.ts` & `auth.routes.ts`: Staff login, logout, profile ('/me'), and workspace agents list.
+- `src/modules/tickets/ticket.service.ts`: Business logic, state machine validation, tracking token generation, atomic sequencing, and automatic reopen triggers.
+- `src/modules/tickets/publicTicket.controller.ts` & `publicTicket.routes.ts`: Public ticket creation, tracking, and customer messaging with IP rate limiting.
+- `src/modules/tickets/staffTicket.controller.ts` & `staffTicket.routes.ts`: Authenticated, tenant-scoped ticket management, status transitions, assignments, and messaging.
+- `src/scripts/seed.ts`: Seed script provisioning Acme SaaS Support workspace, 3 demo staff users, and 4 sample tickets.
+- `tests/tickets.test.ts`: Vitest automated integration suite covering 10 distinct security, lifecycle, and isolation scenarios.
+
+Frontend:
+- `src/api/client.ts`: Typed API client for public intake, customer tracking, staff auth, and staff ticket operations.
+- `src/context/AuthContext.tsx`: React Context managing user authentication, token persistence, and login/logout state.
+- `src/components/Badges.tsx`: Reusable `StatusBadge`, `PriorityBadge`, and `CategoryBadge` components.
+- `src/components/Navbar.tsx`: Polished top navigation bar adapting to guest vs. authenticated staff states.
+- `src/pages/SupportPage.tsx`: Public customer ticket intake form with validation and confirmation card.
+- `src/pages/TrackTicketPage.tsx`: Customer tracking portal with live conversation thread and follow-up messaging.
+- `src/pages/LoginPage.tsx`: Shared staff login screen with one-click demo credentials.
+- `src/pages/TicketsInboxPage.tsx`: Centralized staff inbox with search, filter tabs, priority filters, and pagination.
+- `src/pages/TicketDetailPage.tsx`: Staff ticket workspace with status transition dropdown, assignment selector, dual-mode reply/internal note composer, and audit timeline.
+- `src/App.tsx`: Clean customer Help Desk home page with direct ticket lookup bar, routing, and ProtectedRoute guards.
+
+--------------------------------------------------------------------------------
+4. CODE QUALITY & SECURITY AUDIT FINDINGS
+--------------------------------------------------------------------------------
+
+[A] Duplicated Code:
+    - Initially, error handling was repeated across async routes. Fixed by implementing `asyncHandler.ts`, standardizing promise rejection routing to `errorHandler.ts`.
+[B] Unnecessary Dependencies:
+    - All dependencies (`bcryptjs`, `jsonwebtoken`, `cookie-parser`, `express-rate-limit`, `@tanstack/react-query`) serve direct, required architectural purposes. No bloatware or unused libraries were introduced.
+[C] Placeholder Functionality:
+    - Zero placeholder functions exist. All routes read and persist real MongoDB documents via Mongoose models.
+[D] Security Verification:
+    - Insecure Direct Object Reference (IDOR) Defense: Public ticket tracking URLs use 64-char crypto tokens (`/track/:token`), never incremental IDs or predictable slugs.
+    - Tenant Isolation: Staff routes query `{ _id: ticketId, workspaceId: req.workspaceId }`. An agent from Workspace B attempting to query Workspace A receives a 404 error.
+    - Message Confidentiality: Customer tracking queries strictly filter `{ type: 'reply' }`. Internal staff notes are never serialized to the public API.
+    - Password Security: `passwordHash` has `select: false` on the User model; passwords are never exposed in user responses.
+    - Rate Limiting: Public endpoints enforce 100 requests per 15 minutes per IP.
+
+--------------------------------------------------------------------------------
+5. ACCEPTANCE CRITERIA VERIFICATION
+--------------------------------------------------------------------------------
+[x] Customer submits a ticket through the public support form: VERIFIED
+[x] Backend validates input, generates unique reference code, and persists ticket: VERIFIED
+[x] Customer receives secure tracking link: VERIFIED
+[x] Staff can list and view tickets within their authorized workspace: VERIFIED
+[x] Agents can search, filter, sort, and paginate tickets: VERIFIED
+[x] Authorized staff can assign tickets and change status/priority: VERIFIED
+[x] Agents can add customer-visible replies and private internal notes: VERIFIED
+[x] Customers track tickets and add follow-ups without seeing internal notes: VERIFIED
+[x] Important changes are recorded in an audit history: VERIFIED
+[x] Invalid status transitions and unauthorized operations are rejected: VERIFIED
+[x] 100% of integration test suites pass (13/13 tests): VERIFIED
+[x] TypeScript compilation passes with 0 errors across backend and frontend: VERIFIED
+
+--------------------------------------------------------------------------------
+6. BEGINNER-FRIENDLY CODE ARCHITECTURE EXPLANATION
+--------------------------------------------------------------------------------
+
+Q1: Why do we separate the 'app.ts' file from 'server.ts'?
+A1: In 'app.ts', we configure Express (routes, middleware, and parsers). In 'server.ts',
+    we start the network listener (`server.listen(5000)`). By keeping them separate,
+    our automated test suite (Supertest) can import `app` and test HTTP requests
+    directly in-memory without needing to bind to an actual network port.
+
+Q2: Why use a 32-byte tracking token instead of a regular ID like #1001 for customers?
+A2: If we used `/track/1001`, an attacker could change the URL to `/track/1002` and read
+    another customer's confidential support conversations. A 32-byte cryptographic
+    token has $2^{256}$ possibilities, making guessing or brute-forcing mathematically
+    impossible.
+
+Q3: What is the purpose of the 'asyncHandler' utility?
+A3: In Express 4, if an `async` function throws an error (for example, when a status
+    transition is invalid), Express does not automatically catch it unless you wrap
+    it in a try/catch or use `asyncHandler`. Without it, the server would hang or log
+    an 'UnhandledPromiseRejection'. `asyncHandler` ensures every error safely flows
+    into our centralized error handler.
+
+--------------------------------------------------------------------------------
+7. MANUAL TESTING CHECKLIST FOR USER
+--------------------------------------------------------------------------------
+Start development environment from root directory:
+$ npm run dev
+
+Step 1: Public Ticket Submission
+- Open http://localhost:5173/support
+- Enter Name: "Alice Smith", Email: "alice@example.com", Subject: "Printer configuration issue".
+- Submit form. Note the generated Reference Code (e.g. TCK-1005).
+- Click "Track Ticket & View Thread". Note that there are no messages yet.
+
+Step 2: Staff Login & Assignment
+- Open an incognito window or second tab: http://localhost:5173/login
+- Click the "Alex Agent" button to fill demo credentials and log in.
+- You will land on http://localhost:5173/agent/tickets.
+- Locate the newly created ticket ("Printer configuration issue") and click on it.
+- In the "Status Transition" dropdown, select "In Progress".
+- In the "Assigned Staff" dropdown, select "Alex Agent".
+
+Step 3: Internal Note vs. Public Reply Testing
+- In the ticket composer, click "Private Internal Note" (amber button).
+- Type: "Verified logs. Network port is blocked on customer firewall." and click "Save Internal Note".
+- Switch the composer to "Customer-Visible Reply" (blue button).
+- Type: "Hello Alice, we have identified the issue. Please check firewall rules for port 9100." and send.
+
+Step 4: Customer Privacy Verification
+- Switch back to the customer tab (http://localhost:5173/track/<token>).
+- Notice that the public reply from Support is visible.
+- Notice that the internal note is COMPLETELY ABSENT.
+
+Step 5: Customer Reopen Testing
+- In the staff tab, change the status to "Resolved".
+- In the customer tab, write a follow-up: "Still having issues after updating firewall." and submit.
+- Refresh the staff tab: Observe that the status has automatically transitioned back to "Open" with an audit record!
+================================================================================
