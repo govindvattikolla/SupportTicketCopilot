@@ -1,0 +1,172 @@
+================================================================================
+SUPPORTFLOW - PHASE 1 IMPLEMENTATION REVIEW & ARCHITECTURE SPECIFICATION
+================================================================================
+Generated: 2026-10-27
+Author: SupportFlow Engineering Team
+Phase: Phase 1 - Multi-Tenant Foundation, Authentication, RBAC & Admin Bootstrap
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Phase 1 implements the security and multi-tenant backbone of SupportFlow. It
+defines the Workspace tenant boundary, internal staff user schemas, role-based
+access control (RBAC), secure bcrypt password hashing, JWT/cookie authentication,
+and an automated bootstrap seed script that provisions initial staff accounts
+without exposing public staff registration.
+
+Every subsequent feature (tickets, internal notes, assignments, SLAs, and
+analytics) relies directly on the tenant isolation and authorization guarantees
+established in this phase.
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL OBJECTIVES & SCOPE
+--------------------------------------------------------------------------------
+1. Multi-Tenant Scoping:
+   - Provide clean tenant isolation so that data belonging to Workspace A is
+     never visible or accessible to staff from Workspace B.
+   - Every workspace resource contains an immutable `workspaceId: Types.ObjectId`
+     reference backed by compound database indexes.
+2. Staff Authentication & Session Management:
+   - Authenticate staff via email, password, and workspace slug.
+   - Dual session transport:
+     * HTTP-only, secure, SameSite cookies for browser security (mitigates XSS).
+     * `Authorization: Bearer <token>` support for automated API access and test runners.
+3. Role-Based Access Control (RBAC):
+   - Support three distinct staff roles:
+     * `agent`: Handles assigned and permitted workspace tickets.
+     * `lead`: Monitors queue distribution, unassigned tickets, and escalations.
+     * `admin`: Manages workspace settings, staff accounts, and configurations.
+4. No Public Staff Registration:
+   - To prevent unauthorized account creation, internal staff accounts cannot
+     be created via open sign-up forms.
+   - Initial workspace administrators and team members are provisioned via a
+     secure CLI seed script (`npm run seed`).
+
+--------------------------------------------------------------------------------
+3. INVENTORY OF PHASE 1 FILES & RESPONSIBILITIES
+--------------------------------------------------------------------------------
+
+Backend:
+- `src/modules/workspaces/workspace.model.ts`:
+  * Mongoose model defining the tenant boundary (`name`, unique lowercase `slug`,
+    atomic `ticketCounter`, and workspace settings).
+  * Unique index on `{ slug: 1 }`.
+- `src/modules/users/user.model.ts`:
+  * Staff user schema with roles (`admin`, `lead`, `agent`), active status (`isActive`),
+    and `passwordHash`.
+  * Security: `passwordHash` is configured with `select: false` so hashes are
+    never returned in standard queries or JSON responses.
+  * Helper method: `comparePassword(candidate: string)` using bcrypt.
+  * Compound unique index on `{ workspaceId: 1, email: 1 }` (guarantees email
+    uniqueness within a workspace while allowing multi-workspace presence).
+- `src/modules/auth/auth.service.ts`:
+  * `generateToken(user)`: Signs a JWT payload containing `userId`, `workspaceId`,
+    `email`, and `role` with expiration (`7d`).
+  * `verifyToken(token)`: Validates JWT signature and returns decoded payload.
+  * `loginUser(email, password, workspaceSlug?)`: Looks up user by email and
+    workspace, verifies password via bcrypt, and issues JWT.
+- `src/middleware/auth.ts`:
+  * `authenticate`: Middleware checking `Authorization: Bearer <token>` or
+    cookie `req.cookies.token`. Verifies JWT signature, confirms user is active,
+    and attaches `req.user` and verified `req.workspaceId` to Express request.
+  * `requireRole(allowedRoles)`: RBAC middleware ensuring only authorized staff
+    roles can perform protected actions.
+- `src/modules/auth/auth.controller.ts`:
+  * `login`: Validates input with Zod, invokes `loginUser`, and sets HTTP-only cookie.
+  * `logout`: Clears authentication cookie.
+  * `getCurrentUser`: Returns authenticated user profile and active workspace info.
+  * `getWorkspaceAgents`: Lists active agents within `req.workspaceId`.
+- `src/modules/auth/auth.routes.ts`:
+  * Route definitions for `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`,
+    and `/api/auth/agents`.
+- `src/scripts/seed.ts`:
+  * Bootstrap script that creates the default workspace ('Acme SaaS Support',
+    slug: 'demo'), generates bcrypt hashes, and provisions default staff users.
+
+Frontend:
+- `src/context/AuthContext.tsx`:
+  * Manages global staff authentication state (`user`, `token`, `workspace`,
+    `login()`, `logout()`).
+  * Persists token in localStorage and validates session against `/api/auth/me`.
+- `src/pages/LoginPage.tsx`:
+  * Shared staff login interface with email, password, and workspace slug inputs.
+  * One-click demo credentials for quick role switching (`Agent`, `Lead`, `Admin`).
+
+--------------------------------------------------------------------------------
+4. DATA FLOW: AUTHENTICATION & TENANT ENFORCEMENT
+--------------------------------------------------------------------------------
+
+A. Staff Login Flow:
+   1. Staff enters email, password, and workspace slug at `/login`.
+   2. Frontend calls `POST /api/auth/login`.
+   3. Controller validates schema via Zod (`loginSchema`).
+   4. Service queries `User.findOne({ email, workspaceId }).select('+passwordHash')`.
+   5. If user not found or `isActive === false`, rejects with 401 Unauthorized.
+   6. `bcrypt.compare(password, passwordHash)` validates password.
+   7. `generateToken()` creates signed JWT containing `{ userId, workspaceId, email, role }`.
+   8. Server sets HTTP-only secure cookie and returns `{ success: true, data: { user, token } }`.
+   9. Frontend stores token, updates AuthContext, and redirects to staff portal.
+
+B. Authenticated Request & Tenant Guard Flow:
+   1. Client sends request with `Authorization: Bearer <token>` or cookie.
+   2. `authenticate` middleware intercepts request:
+      - Verifies JWT signature using `env.JWT_SECRET`.
+      - Confirms user exists in MongoDB and `isActive: true`.
+      - Sets `req.user` and `req.workspaceId = user.workspaceId`.
+   3. Downstream controllers/services NEVER read `workspaceId` from the client's
+      request body or query params. All database operations strictly filter by
+      `req.workspaceId`.
+   4. This guarantees mathematical tenant isolation: even if an attacker tampers
+      with a request payload, they cannot access another workspace's records.
+
+--------------------------------------------------------------------------------
+5. SECURITY AUDIT & DEFENSE MECHANISMS
+--------------------------------------------------------------------------------
+[x] Password Storage: Hashed using bcrypt with 10 salt rounds. Plaintext passwords
+    are never stored.
+[x] Hash Exposure Prevention: `passwordHash` field has `select: false` on Mongoose
+    model; queries do not return password hashes to the client.
+[x] Session Security: HTTP-only cookies prevent JavaScript reading tokens (XSS defense).
+    Bearer tokens enable testing and programmatic API consumption.
+[x] Cross-Workspace Leakage: All queries enforce `{ workspaceId: req.workspaceId }`.
+[x] Privilege Escalation: Roles (`admin`, `lead`, `agent`) are embedded in the
+    cryptographically signed JWT; users cannot elevate their role in client payloads.
+[x] Open Registration Attack: Public registration endpoint is omitted entirely.
+    Staff accounts are provisioned via seed script or by an authenticated admin.
+
+--------------------------------------------------------------------------------
+6. BEGINNER-FRIENDLY CODE ARCHITECTURE EXPLANATION
+--------------------------------------------------------------------------------
+
+Q1: What does 'select: false' on the passwordHash field actually do?
+A1: By default, when you do `User.find()` or `User.findById()`, Mongoose retrieves
+    all document fields. If you accidentally return that user document in an API
+    response, the password hash would be sent to the browser! Setting `select: false`
+    tells Mongoose: "Never include this field in queries unless I explicitly ask
+    for it with `.select('+passwordHash')`." This eliminates accidental hash leaks.
+
+Q2: Why do we store the 'workspaceId' inside the JWT token?
+A2: When a staff member logs in, their verified workspace association is signed
+    into the JWT. The client cannot edit the token because any modification
+    invalidates the cryptographic signature. When Express receives a request,
+    it knows with 100% certainty which workspace the user belongs to without
+    trusting user-supplied input.
+
+Q3: Why not have a public signup page for staff?
+A3: SupportFlow is an enterprise SaaS platform. Customers should submit tickets
+    without accounts, but internal staff accounts have access to confidential
+    customer data, internal notes, and system settings. Letting anyone register
+    as an agent would create a critical security vulnerability. Only authorized
+    workspace admins can provision staff accounts.
+
+--------------------------------------------------------------------------------
+7. VERIFICATION
+--------------------------------------------------------------------------------
+[x] Workspace model with unique slug & atomic counter: VERIFIED
+[x] User model with role validation and password hashing: VERIFIED
+[x] JWT signing and verification service: VERIFIED
+[x] Authentication and RBAC middleware: VERIFIED
+[x] Staff login and session management: VERIFIED
+[x] Seed script provisioning default workspace and users: VERIFIED
+[x] Multi-tenant isolation verified in automated test suite: VERIFIED
+================================================================================
