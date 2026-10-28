@@ -184,11 +184,31 @@ export interface ListTicketsQuery {
   assignedTo?: string;
   category?: string;
   search?: string;
+  overdue?: string | boolean;
+  highPriority?: string | boolean;
   page?: number;
   limit?: number;
   sortBy?: 'createdAt' | 'priority' | 'status' | 'updatedAt';
   sortOrder?: 'asc' | 'desc';
 }
+
+export const getOverdueFilter = () => {
+  const now = new Date();
+  const h4Ago = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+  const h24Ago = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const h48Ago = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+  const h72Ago = new Date(now.getTime() - 72 * 60 * 60 * 1000);
+
+  return {
+    status: { $in: ['open', 'in_progress', 'pending'] },
+    $or: [
+      { priority: 'P1', createdAt: { $lt: h4Ago } },
+      { priority: 'P2', createdAt: { $lt: h24Ago } },
+      { priority: 'P3', createdAt: { $lt: h48Ago } },
+      { priority: 'P4', createdAt: { $lt: h72Ago } },
+    ],
+  };
+};
 
 export const listWorkspaceTickets = async (
   workspaceId: Types.ObjectId,
@@ -203,7 +223,11 @@ export const listWorkspaceTickets = async (
   const filter: any = { workspaceId };
 
   if (query.status && query.status !== 'all') {
-    filter.status = query.status;
+    if (query.status.includes(',')) {
+      filter.status = { $in: query.status.split(',').map((s) => s.trim()) };
+    } else {
+      filter.status = query.status;
+    }
   }
   if (query.priority && query.priority !== 'all') {
     filter.priority = query.priority;
@@ -216,6 +240,19 @@ export const listWorkspaceTickets = async (
       filter.assignedTo = { $exists: false };
     } else if (Types.ObjectId.isValid(query.assignedTo)) {
       filter.assignedTo = new Types.ObjectId(query.assignedTo);
+    }
+  }
+
+  if (query.overdue === 'true' || query.overdue === true) {
+    const overdueCond = getOverdueFilter();
+    filter.status = overdueCond.status;
+    filter.$or = overdueCond.$or;
+  }
+
+  if (query.highPriority === 'true' || query.highPriority === true) {
+    filter.priority = { $in: ['P1', 'P2'] };
+    if (!filter.status) {
+      filter.status = { $nin: ['resolved', 'closed'] };
     }
   }
 

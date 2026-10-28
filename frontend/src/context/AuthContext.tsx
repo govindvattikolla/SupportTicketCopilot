@@ -6,7 +6,7 @@ interface AuthContextType {
   workspace: any | null;
   token: string | null;
   isLoading: boolean;
-  login: (email: string, pass: string, slug?: string) => Promise<void>;
+  login: (email: string, pass: string, slug?: string) => Promise<User>;
   logout: () => Promise<void>;
 }
 
@@ -46,6 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('supportflow_token', res.token);
     setToken(res.token);
     setUser(res.user);
+    return res.user;
   };
 
   const logout = async () => {

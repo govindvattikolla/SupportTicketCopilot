@@ -1,16 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import bcrypt from 'bcryptjs';
 import { createApp } from '../src/app';
-import { connectDatabase, closeDatabase } from '../src/config/db';
 import { Workspace } from '../src/modules/workspaces/workspace.model';
 import { User } from '../src/modules/users/user.model';
 import { Ticket } from '../src/modules/tickets/ticket.model';
 import { Message } from '../src/modules/messages/message.model';
+import { createTestDatabase, TestDbInstance } from './testDb';
 
 describe('Phase 2 - Complete Ticket Lifecycle & Security Suite', () => {
-  let mongoServer: MongoMemoryServer;
+  let testDb: TestDbInstance;
   const app = createApp();
 
   let workspaceA: any;
@@ -21,9 +20,7 @@ describe('Phase 2 - Complete Ticket Lifecycle & Security Suite', () => {
   let tokenB: string;
 
   beforeAll(async () => {
-    mongoServer = await MongoMemoryServer.create();
-    const uri = mongoServer.getUri();
-    await connectDatabase(uri);
+    testDb = await createTestDatabase('tickets');
 
     // Setup Workspace A
     workspaceA = await Workspace.create({
@@ -73,10 +70,7 @@ describe('Phase 2 - Complete Ticket Lifecycle & Security Suite', () => {
   });
 
   afterAll(async () => {
-    await closeDatabase();
-    if (mongoServer) {
-      await mongoServer.stop();
-    }
+    await testDb.close();
   });
 
   let createdTicketNumber: string;

@@ -1,25 +1,20 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import { createApp } from '../src/app';
-import { connectDatabase, closeDatabase } from '../src/config/db';
+import { connectDatabase } from '../src/config/db';
+import { createTestDatabase, TestDbInstance } from './testDb';
 
 describe('Health and Application Endpoints', () => {
-  let mongoServer: MongoMemoryServer;
+  let testDb: TestDbInstance;
   const app = createApp();
 
   beforeAll(async () => {
-    mongoServer = await MongoMemoryServer.create();
-    const uri = mongoServer.getUri();
-    await connectDatabase(uri);
+    testDb = await createTestDatabase('health');
   });
 
   afterAll(async () => {
-    await closeDatabase();
-    if (mongoServer) {
-      await mongoServer.stop();
-    }
+    await testDb.close();
   });
 
   it('GET /api/health should return 200 OK when database is connected', async () => {
@@ -58,7 +53,7 @@ describe('Health and Application Endpoints', () => {
     expect(response.body.data.database.healthy).toBe(false);
 
     // Reconnect for subsequent tests / clean teardown
-    const uri = mongoServer.getUri();
+    const uri = testDb.uri;
     await connectDatabase(uri);
   });
 });

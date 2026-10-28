@@ -39,6 +39,21 @@ export const errorHandler = (
     return;
   }
 
+  // Mongoose connection failure / buffering timeout
+  if (
+    err.name === 'MongooseError' ||
+    err.message?.includes('buffering timed out') ||
+    err.message?.includes('ECONNREFUSED')
+  ) {
+    sendError(
+      res,
+      'Database connection unavailable. Please check that MongoDB is running and accessible.',
+      503,
+      'DATABASE_UNAVAILABLE'
+    );
+    return;
+  }
+
   // Unknown / unhandled system error
   // Log full error internally for debugging without exposing secrets
   console.error('[Unhandled Server Error]:', {

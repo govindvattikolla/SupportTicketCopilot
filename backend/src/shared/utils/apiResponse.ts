@@ -29,6 +29,14 @@ export const sendSuccess = <T>(
   return res.status(statusCode).json(payload);
 };
 
+export const sendCreated = <T>(
+  res: Response,
+  data: T,
+  message?: string
+): Response => {
+  return sendSuccess(res, data, message, 201);
+};
+
 export const sendError = (
   res: Response,
   message: string,

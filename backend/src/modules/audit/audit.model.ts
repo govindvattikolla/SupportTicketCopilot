@@ -21,7 +21,7 @@ const AuditEventSchema = new Schema<IAuditEvent>(
     ticketId: {
       type: Schema.Types.ObjectId,
       ref: 'Ticket',
-      required: true,
+      required: false,
       index: true,
     },
     workspaceId: {

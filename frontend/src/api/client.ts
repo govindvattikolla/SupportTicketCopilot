@@ -205,6 +205,8 @@ export interface ListTicketsParams {
   assignedTo?: string;
   category?: string;
   search?: string;
+  overdue?: string;
+  highPriority?: string;
   page?: number;
   limit?: number;
 }
@@ -224,6 +226,8 @@ export const listTicketsApi = async (params: ListTicketsParams): Promise<ListTic
   if (params.assignedTo) query.set('assignedTo', params.assignedTo);
   if (params.category) query.set('category', params.category);
   if (params.search) query.set('search', params.search);
+  if (params.overdue) query.set('overdue', params.overdue);
+  if (params.highPriority) query.set('highPriority', params.highPriority);
   if (params.page) query.set('page', params.page.toString());
   if (params.limit) query.set('limit', params.limit.toString());
 
@@ -278,3 +282,439 @@ export const addStaffMessageApi = async (
     body: JSON.stringify({ type, content }),
   });
 };
+
+// Phase 3 Reporting & Dashboard APIs
+export interface AgentSummaryData {
+  myOpenCount: number;
+  myInProgressCount: number;
+  myHighPriorityCount: number;
+  myOverdueCount: number;
+  highPriorityTickets: Ticket[];
+  overdueTickets: Ticket[];
+  recentActivity: AuditEvent[];
+}
+
+export interface AgentWorkloadItem {
+  user: {
+    _id: string;
+    name: string;
+    email: string;
+    role: string;
+  };
+  totalAssigned: number;
+  openCount: number;
+  inProgressCount: number;
+  pendingCount: number;
+  resolvedCount: number;
+}
+
+export interface TeamLeadReportData {
+  teamWorkload: {
+    totalTickets: number;
+    openTickets: number;
+    inProgressTickets: number;
+    pendingTickets: number;
+    resolvedTickets: number;
+    closedTickets: number;
+    unassignedTickets: number;
+    overdueTickets: number;
+    highPriorityTickets: number;
+  };
+  agentWorkloads: AgentWorkloadItem[];
+  categoryBreakdown: Record<string, number>;
+  priorityBreakdown: Record<string, number>;
+  statusBreakdown: Record<string, number>;
+  unassignedTickets: Ticket[];
+  overdueTickets: Ticket[];
+}
+
+export interface WorkspaceInfo {
+  _id: string;
+  name: string;
+  slug: string;
+  ticketCounter: number;
+  settings: {
+    defaultPriority: TicketPriority;
+    allowCustomerReopen: boolean;
+  };
+  createdAt: string;
+}
+
+export interface AdminOverviewData {
+  workspace: WorkspaceInfo;
+  ticketCounts: {
+    total: number;
+    byStatus: Record<string, number>;
+    byPriority: Record<string, number>;
+    byCategory: Record<string, number>;
+  };
+  teamStats: {
+    totalMembers: number;
+    activeMembers: number;
+    inactiveMembers: number;
+    byRole: {
+      admin: number;
+      lead: number;
+      agent: number;
+    };
+  };
+  resolutionMetrics: {
+    totalResolved: number;
+    resolutionRate: number;
+  };
+  recentAuditEvents: AuditEvent[];
+}
+
+export const getAgentSummaryApi = async (): Promise<AgentSummaryData> => {
+  return apiClient<AgentSummaryData>('/api/reports/agent-summary');
+};
+
+export const getTeamLeadReportApi = async (): Promise<TeamLeadReportData> => {
+  return apiClient<TeamLeadReportData>('/api/reports/team');
+};
+
+export const getAdminOverviewApi = async (): Promise<AdminOverviewData> => {
+  return apiClient<AdminOverviewData>('/api/reports/admin');
+};
+
+// Workspace Management APIs
+export const getCurrentWorkspaceApi = async (): Promise<WorkspaceInfo> => {
+  return apiClient<WorkspaceInfo>('/api/workspaces/current');
+};
+
+export interface UpdateWorkspaceSettingsDTO {
+  name?: string;
+  defaultPriority?: TicketPriority;
+  allowCustomerReopen?: boolean;
+}
+
+export const updateWorkspaceSettingsApi = async (
+  dto: UpdateWorkspaceSettingsDTO
+): Promise<WorkspaceInfo> => {
+  return apiClient<WorkspaceInfo>('/api/workspaces/current/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(dto),
+  });
+};
+
+// Team Member Management APIs
+export interface TeamMember extends User {
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export const getWorkspaceUsersApi = async (): Promise<TeamMember[]> => {
+  return apiClient<TeamMember[]>('/api/users');
+};
+
+export interface CreateUserDTO {
+  name: string;
+  email: string;
+  password: string;
+  role: 'admin' | 'lead' | 'agent';
+}
+
+export const createWorkspaceUserApi = async (dto: CreateUserDTO): Promise<TeamMember> => {
+  return apiClient<TeamMember>('/api/users', {
+    method: 'POST',
+    body: JSON.stringify(dto),
+  });
+};
+
+export interface UpdateUserDTO {
+  name?: string;
+  role?: 'admin' | 'lead' | 'agent';
+  isActive?: boolean;
+}
+
+export const updateWorkspaceUserApi = async (
+  id: string,
+  dto: UpdateUserDTO
+): Promise<TeamMember> => {
+  return apiClient<TeamMember>(`/api/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(dto),
+  });
+};
+
+// Audit Trail API
+export interface ListAuditEventsParams {
+  page?: number;
+  limit?: number;
+  action?: string;
+  actorType?: string;
+  ticketId?: string;
+}
+
+export interface ListAuditEventsResult {
+  events: AuditEvent[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export const getWorkspaceAuditEventsApi = async (
+  params: ListAuditEventsParams = {}
+): Promise<ListAuditEventsResult> => {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', params.page.toString());
+  if (params.limit) query.set('limit', params.limit.toString());
+  if (params.action) query.set('action', params.action);
+  if (params.actorType) query.set('actorType', params.actorType);
+  if (params.ticketId) query.set('ticketId', params.ticketId);
+
+  return apiClient<ListAuditEventsResult>(`/api/audit?${query.toString()}`);
+};
+
+// ============================================================================
+// AGENT <-> TEAM LEAD TICKET QUERIES & CONSULTATIONS
+// ============================================================================
+export type TicketQueryCategory =
+  | 'technical'
+  | 'refund_approval'
+  | 'policy_guidance'
+  | 'sla_escalation'
+  | 'customer_dispute'
+  | 'other';
+
+export type TicketQueryUrgency = 'low' | 'medium' | 'high' | 'urgent';
+export type TicketQueryStatus = 'open' | 'in_review' | 'resolved' | 'closed';
+
+export interface TicketQueryMessage {
+  _id?: string;
+  senderId: string;
+  senderName: string;
+  senderRole: 'agent' | 'lead' | 'admin';
+  message: string;
+  createdAt: string;
+}
+
+export interface TicketQuery {
+  _id: string;
+  workspaceId: string;
+  ticketId: string | Ticket;
+  ticketNumber: string;
+  agentId: string;
+  agentName: string;
+  leadId?: string;
+  leadName?: string;
+  subject: string;
+  category: TicketQueryCategory;
+  urgency: TicketQueryUrgency;
+  status: TicketQueryStatus;
+  messages: TicketQueryMessage[];
+  resolutionSummary?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTicketQueryDTO {
+  ticketId: string;
+  subject: string;
+  category: TicketQueryCategory;
+  urgency: TicketQueryUrgency;
+  message: string;
+  leadId?: string;
+}
+
+export interface ListTicketQueriesResult {
+  queries: TicketQuery[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+  summary: {
+    total: number;
+    open: number;
+    inReview: number;
+    resolved: number;
+    urgent: number;
+  };
+}
+
+export const createTicketQueryApi = async (dto: CreateTicketQueryDTO): Promise<TicketQuery> => {
+  return apiClient<TicketQuery>('/api/ticket-queries', {
+    method: 'POST',
+    body: JSON.stringify(dto),
+  });
+};
+
+export const listTicketQueriesApi = async (params: {
+  status?: string;
+  urgency?: string;
+  category?: string;
+  ticketId?: string;
+  agentId?: string;
+  page?: number;
+  limit?: number;
+} = {}): Promise<ListTicketQueriesResult> => {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  if (params.urgency) query.set('urgency', params.urgency);
+  if (params.category) query.set('category', params.category);
+  if (params.ticketId) query.set('ticketId', params.ticketId);
+  if (params.agentId) query.set('agentId', params.agentId);
+  if (params.page) query.set('page', params.page.toString());
+  if (params.limit) query.set('limit', params.limit.toString());
+
+  return apiClient<ListTicketQueriesResult>(`/api/ticket-queries?${query.toString()}`);
+};
+
+export const getTicketQueryApi = async (id: string): Promise<TicketQuery> => {
+  return apiClient<TicketQuery>(`/api/ticket-queries/${id}`);
+};
+
+export const addTicketQueryMessageApi = async (
+  id: string,
+  message: string
+): Promise<TicketQuery> => {
+  return apiClient<TicketQuery>(`/api/ticket-queries/${id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+};
+
+export const updateTicketQueryStatusApi = async (
+  id: string,
+  status: TicketQueryStatus,
+  resolutionSummary?: string
+): Promise<TicketQuery> => {
+  return apiClient<TicketQuery>(`/api/ticket-queries/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, resolutionSummary }),
+  });
+};
+
+// ============================================================================
+// TEAM LEAD <-> ADMIN OPERATIONAL REPORTS & ESCALATIONS
+// ============================================================================
+export type AdminReportCategory =
+  | 'incident_escalation'
+  | 'staffing_capacity'
+  | 'policy_compliance'
+  | 'sla_bottleneck'
+  | 'tooling_request'
+  | 'general_update';
+
+export type AdminReportPriority = 'low' | 'medium' | 'high' | 'critical';
+export type AdminReportStatus =
+  | 'submitted'
+  | 'acknowledged'
+  | 'in_progress'
+  | 'resolved'
+  | 'closed';
+
+export interface AdminReportMessage {
+  _id?: string;
+  senderId: string;
+  senderName: string;
+  senderRole: 'lead' | 'admin';
+  message: string;
+  createdAt: string;
+}
+
+export interface AdminReport {
+  _id: string;
+  workspaceId: string;
+  leadId: string;
+  leadName: string;
+  title: string;
+  category: AdminReportCategory;
+  priority: AdminReportPriority;
+  status: AdminReportStatus;
+  summary: string;
+  actionRequired?: string;
+  ticketId?: string | Ticket;
+  ticketNumber?: string;
+  messages: AdminReportMessage[];
+  adminDirective?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAdminReportDTO {
+  title: string;
+  category: AdminReportCategory;
+  priority: AdminReportPriority;
+  summary: string;
+  actionRequired?: string;
+  ticketId?: string;
+}
+
+export interface ListAdminReportsResult {
+  reports: AdminReport[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+  summary: {
+    total: number;
+    submitted: number;
+    critical: number;
+    inProgress: number;
+    resolved: number;
+  };
+}
+
+export const createAdminReportApi = async (dto: CreateAdminReportDTO): Promise<AdminReport> => {
+  return apiClient<AdminReport>('/api/admin-reports', {
+    method: 'POST',
+    body: JSON.stringify(dto),
+  });
+};
+
+export const listAdminReportsApi = async (params: {
+  status?: string;
+  priority?: string;
+  category?: string;
+  leadId?: string;
+  page?: number;
+  limit?: number;
+} = {}): Promise<ListAdminReportsResult> => {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  if (params.priority) query.set('priority', params.priority);
+  if (params.category) query.set('category', params.category);
+  if (params.leadId) query.set('leadId', params.leadId);
+  if (params.page) query.set('page', params.page.toString());
+  if (params.limit) query.set('limit', params.limit.toString());
+
+  return apiClient<ListAdminReportsResult>(`/api/admin-reports?${query.toString()}`);
+};
+
+export const getAdminReportApi = async (id: string): Promise<AdminReport> => {
+  return apiClient<AdminReport>(`/api/admin-reports/${id}`);
+};
+
+export const addAdminReportMessageApi = async (
+  id: string,
+  message: string
+): Promise<AdminReport> => {
+  return apiClient<AdminReport>(`/api/admin-reports/${id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+};
+
+export const updateAdminReportStatusApi = async (
+  id: string,
+  status: AdminReportStatus,
+  adminDirective?: string
+): Promise<AdminReport> => {
+  return apiClient<AdminReport>(`/api/admin-reports/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, adminDirective }),
+  });
+};
+
+

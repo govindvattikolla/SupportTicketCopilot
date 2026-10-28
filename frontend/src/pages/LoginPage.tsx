@@ -19,8 +19,14 @@ export const LoginPage: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      await login(email, password, workspaceSlug);
-      navigate('/agent/tickets');
+      const loggedUser = await login(email, password, workspaceSlug);
+      if (loggedUser.role === 'admin') {
+        navigate('/admin/dashboard');
+      } else if (loggedUser.role === 'lead') {
+        navigate('/lead/dashboard');
+      } else {
+        navigate('/agent/dashboard');
+      }
     } catch (err: any) {
       setErrorMessage(err.message || 'Login failed. Please check your credentials.');
     } finally {

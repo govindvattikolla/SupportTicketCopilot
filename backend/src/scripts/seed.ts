@@ -6,6 +6,8 @@ import { User } from '../modules/users/user.model';
 import { Ticket } from '../modules/tickets/ticket.model';
 import { Message } from '../modules/messages/message.model';
 import { AuditEvent } from '../modules/audit/audit.model';
+import { TicketQuery } from '../modules/ticketQueries/ticketQuery.model';
+import { AdminReport } from '../modules/adminReports/adminReport.model';
 
 export const seedDatabase = async () => {
   console.log('🌱 Starting database seed for SupportFlow...');
@@ -126,6 +128,46 @@ export const seedDatabase = async () => {
         resolvedAt: new Date(),
         assignedTo: createdUsers['agent']._id,
       },
+      {
+        workspaceId: workspace._id,
+        ticketNumber: 'TCK-1005',
+        trackingToken: crypto.randomBytes(32).toString('hex'),
+        customer: { name: 'Marcus Brody', email: 'marcus@indyfintech.com' },
+        subject: 'Database connection pools exhausted during peak hours',
+        description:
+          'Our microservice is throwing 500 errors when connecting to SupportFlow API due to sudden rate limit drop.',
+        category: 'technical' as const,
+        priority: 'P1' as const,
+        status: 'open' as const,
+        createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000), // 6 hours ago -> Overdue P1
+      },
+      {
+        workspaceId: workspace._id,
+        ticketNumber: 'TCK-1006',
+        trackingToken: crypto.randomBytes(32).toString('hex'),
+        customer: { name: 'Elena Rostova', email: 'elena@cybersec.org' },
+        subject: 'Security vulnerability report: CSP header missing on subdomains',
+        description:
+          'We ran a routine vulnerability scan and observed that *.supportflow.com lacks strict Content-Security-Policy headers.',
+        category: 'bug' as const,
+        priority: 'P2' as const,
+        status: 'open' as const,
+        createdAt: new Date(Date.now() - 36 * 60 * 60 * 1000), // 36 hours ago -> Overdue P2, Unassigned
+      },
+      {
+        workspaceId: workspace._id,
+        ticketNumber: 'TCK-1007',
+        trackingToken: crypto.randomBytes(32).toString('hex'),
+        customer: { name: 'Carlos Mendez', email: 'carlos@growthhub.co' },
+        subject: 'Requesting webhook payload customization for HubSpot CRM sync',
+        description:
+          'We would love to include custom user metadata inside the webhook payload for closed ticket events.',
+        category: 'feature_request' as const,
+        priority: 'P4' as const,
+        status: 'in_progress' as const,
+        assignedTo: createdUsers['agent']._id,
+        createdAt: new Date(Date.now() - 12 * 60 * 60 * 1000),
+      },
     ];
 
     for (const t of sampleTickets) {
@@ -171,6 +213,141 @@ export const seedDatabase = async () => {
     }
 
     console.log('Sample tickets and conversations created successfully.');
+  }
+
+  // Seed sample ticket queries (Agent <-> Lead) if empty
+  const existingQueries = await TicketQuery.countDocuments({ workspaceId: workspace._id });
+  if (existingQueries === 0) {
+    const ticket1001 = await Ticket.findOne({ workspaceId: workspace._id, ticketNumber: 'TCK-1001' });
+    const ticket1002 = await Ticket.findOne({ workspaceId: workspace._id, ticketNumber: 'TCK-1002' });
+
+    if (ticket1001) {
+      await TicketQuery.create({
+        workspaceId: workspace._id,
+        ticketId: ticket1001._id,
+        ticketNumber: ticket1001.ticketNumber,
+        agentId: createdUsers['agent']._id,
+        agentName: createdUsers['agent'].name,
+        leadId: createdUsers['lead']._id,
+        leadName: createdUsers['lead'].name,
+        subject: 'Customer requesting manual PDF invoice generation for tax audit',
+        category: 'refund_approval',
+        urgency: 'high',
+        status: 'in_review',
+        messages: [
+          {
+            senderId: createdUsers['agent']._id,
+            senderName: createdUsers['agent'].name,
+            senderRole: 'agent',
+            message:
+              'The billing portal is throwing a 403 error for John Doe. Can we approve a manual invoice PDF generation from Stripe dashboard and send it directly?',
+            createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+          },
+          {
+            senderId: createdUsers['lead']._id,
+            senderName: createdUsers['lead'].name,
+            senderRole: 'lead',
+            message:
+              'Yes, go ahead and export the PDF from Stripe for invoice #INV-8891 and email it. I will report the 403 bug to Admin for engineering review.',
+            createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000),
+          },
+        ],
+      });
+    }
+
+    if (ticket1002) {
+      await TicketQuery.create({
+        workspaceId: workspace._id,
+        ticketId: ticket1002._id,
+        ticketNumber: ticket1002.ticketNumber,
+        agentId: createdUsers['agent']._id,
+        agentName: createdUsers['agent'].name,
+        subject: 'Clarification on webhook retry timeout policy for enterprise tier',
+        category: 'technical',
+        urgency: 'urgent',
+        status: 'open',
+        messages: [
+          {
+            senderId: createdUsers['agent']._id,
+            senderName: createdUsers['agent'].name,
+            senderRole: 'agent',
+            message:
+              'Emma Watson is asking if enterprise webhook delivery guarantees include automatic exponential retries up to 72 hours. What SLA policy should I quote?',
+            createdAt: new Date(Date.now() - 30 * 60 * 1000),
+          },
+        ],
+      });
+    }
+
+    console.log('Sample ticket queries seeded successfully.');
+  }
+
+  // Seed sample operational reports (Lead <-> Admin) if empty
+  const existingReports = await AdminReport.countDocuments({ workspaceId: workspace._id });
+  if (existingReports === 0) {
+    const ticket1005 = await Ticket.findOne({ workspaceId: workspace._id, ticketNumber: 'TCK-1005' });
+
+    await AdminReport.create({
+      workspaceId: workspace._id,
+      leadId: createdUsers['lead']._id,
+      leadName: createdUsers['lead'].name,
+      title: 'Cluster Database Connection Pool Exhaustion Incident',
+      category: 'incident_escalation',
+      priority: 'critical',
+      status: 'in_progress',
+      summary:
+        'Multiple customers (e.g. TCK-1005) experienced rate-limit spikes and 500 errors during morning peak traffic due to DB pool exhaustion. Microservice workers failed to release connection handles.',
+      actionRequired:
+        'Requesting DevOps infrastructure team increase max connection pool from 50 to 150 on the US-East cluster and schedule bugfix patch.',
+      ticketId: ticket1005?._id,
+      ticketNumber: ticket1005?.ticketNumber,
+      messages: [
+        {
+          senderId: createdUsers['lead']._id,
+          senderName: createdUsers['lead'].name,
+          senderRole: 'lead',
+          message:
+            'Elevating DB pool exhaustion incident. We have open tickets from enterprise clients.',
+          createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000),
+        },
+        {
+          senderId: createdUsers['admin']._id,
+          senderName: createdUsers['admin'].name,
+          senderRole: 'admin',
+          message:
+            'Acknowledged. DevOps has deployed hotfix #441 expanding connection limits to 200. Please monitor error logs over the next 2 hours.',
+          createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        },
+      ],
+      adminDirective:
+        'DevOps patch deployed. Keep ticket TCK-1005 open until client confirms stable callback rate.',
+    });
+
+    await AdminReport.create({
+      workspaceId: workspace._id,
+      leadId: createdUsers['lead']._id,
+      leadName: createdUsers['lead'].name,
+      title: 'Tier 1 Agent Coverage & Shift Scheduling Deficit',
+      category: 'staffing_capacity',
+      priority: 'high',
+      status: 'submitted',
+      summary:
+        'Current weekend shift coverage is insufficient. Overdue P1/P2 tickets increased by 25% due to 1 agent out on planned sick leave.',
+      actionRequired:
+        'Request approval to onboard 2 additional part-time support agents or authorize overtime hours.',
+      messages: [
+        {
+          senderId: createdUsers['lead']._id,
+          senderName: createdUsers['lead'].name,
+          senderRole: 'lead',
+          message:
+            'Submitting staffing analysis for Q4 support volume surge. Need executive review on adding 2 contractor slots.',
+          createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        },
+      ],
+    });
+
+    console.log('Sample admin operational reports seeded successfully.');
   }
 
   console.log(`

@@ -5,8 +5,11 @@ import { Navbar } from './components/Navbar';
 import { SupportPage } from './pages/SupportPage';
 import { TrackTicketPage } from './pages/TrackTicketPage';
 import { LoginPage } from './pages/LoginPage';
-import { TicketsInboxPage } from './pages/TicketsInboxPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
+import { AgentDashboardPage } from './pages/AgentDashboardPage';
+import { TeamLeadDashboardPage } from './pages/TeamLeadDashboardPage';
+import { AdminDashboardPage } from './pages/AdminDashboardPage';
+import { RoleRoute } from './components/RoleRoute';
 import {
   LifeBuoy,
   Search,
@@ -175,10 +178,18 @@ function HelpCenterHome() {
           </div>
 
           <Link
-            to={user ? '/agent/tickets' : '/login'}
+            to={
+              user
+                ? user.role === 'admin'
+                  ? '/admin/dashboard'
+                  : user.role === 'lead'
+                  ? '/lead/dashboard'
+                  : '/agent/dashboard'
+                : '/login'
+            }
             className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium text-xs sm:text-sm border border-slate-600 transition shadow-sm"
           >
-            <span>{user ? 'Go to Staff Inbox' : 'Sign In as Staff'}</span>
+            <span>{user ? 'Go to Staff Portal' : 'Sign In as Staff'}</span>
             <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
@@ -245,12 +256,22 @@ export function App() {
         <Route path="/support" element={<SupportPage />} />
         <Route path="/track/:token" element={<TrackTicketPage />} />
         <Route path="/login" element={<LoginPage />} />
+
+        {/* Agent Portal Routes (strictly for agent role) */}
+        <Route
+          path="/agent/dashboard"
+          element={
+            <RoleRoute allowedRoles={['agent']}>
+              <AgentDashboardPage />
+            </RoleRoute>
+          }
+        />
         <Route
           path="/agent/tickets"
           element={
-            <ProtectedRoute>
-              <TicketsInboxPage />
-            </ProtectedRoute>
+            <RoleRoute allowedRoles={['agent']}>
+              <AgentDashboardPage />
+            </RoleRoute>
           }
         />
         <Route
@@ -261,6 +282,27 @@ export function App() {
             </ProtectedRoute>
           }
         />
+
+        {/* Team Lead Portal Routes (strictly for team lead role) */}
+        <Route
+          path="/lead/dashboard"
+          element={
+            <RoleRoute allowedRoles={['lead']}>
+              <TeamLeadDashboardPage />
+            </RoleRoute>
+          }
+        />
+
+        {/* Workspace Admin Portal Routes (strictly admin) */}
+        <Route
+          path="/admin/dashboard"
+          element={
+            <RoleRoute allowedRoles={['admin']}>
+              <AdminDashboardPage />
+            </RoleRoute>
+          }
+        />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 

@@ -31,15 +31,20 @@ const messageSchema = z.object({
 export const getTickets = async (req: Request, res: Response): Promise<Response> => {
   if (!req.workspaceId) throw new UnauthorizedError('Workspace context required');
 
-  const { status, priority, assignedTo, category, search, page, limit, sortBy, sortOrder } =
+  const { status, priority, assignedTo, category, search, overdue, highPriority, page, limit, sortBy, sortOrder } =
     req.query;
+
+  const resolvedAssignedTo =
+    assignedTo === 'me' && req.user ? req.user._id.toString() : (assignedTo as string);
 
   const result = await listWorkspaceTickets(req.workspaceId, {
     status: status as string,
     priority: priority as string,
-    assignedTo: assignedTo as string,
+    assignedTo: resolvedAssignedTo,
     category: category as string,
     search: search as string,
+    overdue: overdue as string,
+    highPriority: highPriority as string,
     page: page ? parseInt(page as string, 10) : 1,
     limit: limit ? parseInt(limit as string, 10) : 15,
     sortBy: sortBy as any,
