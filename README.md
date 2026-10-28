@@ -1,4 +1,6 @@
-# SupportFlow — Customer Support Operations Platform
+# SupportTicketCopilot
+
+## SupportFlow — Customer Support Operations Platform
 
 SupportFlow is a production-minded customer support operations platform designed for modern SaaS companies. It handles customer ticket intake, staff assignment, conversation threads (public replies vs. internal notes), SLA management, workload balancing, and operational analytics.
 
