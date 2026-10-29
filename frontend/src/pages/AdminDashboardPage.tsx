@@ -53,20 +53,24 @@ import {
   ShieldAlert,
   Clock,
   Timer,
+  Cpu,
 } from 'lucide-react';
 import { SLAConfigEditor } from '../components/SLAConfigEditor';
+import { OperationalIntelligenceTab } from '../components/OperationalIntelligenceTab';
 
 export const AdminDashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Active Admin Tab: 'overview' | 'reports' | 'team' | 'reassign' | 'sla' | 'settings' | 'audit'
+  // Active Admin Tab: 'overview' | 'operations' | 'reports' | 'team' | 'reassign' | 'sla' | 'settings' | 'audit'
   const tabParam = searchParams.get('tab');
   const [adminTab, setAdminTab] = useState<
-    'overview' | 'reports' | 'team' | 'reassign' | 'sla' | 'settings' | 'audit'
+    'overview' | 'operations' | 'reports' | 'team' | 'reassign' | 'sla' | 'settings' | 'audit'
   >(
-    tabParam === 'reports'
+    tabParam === 'operations'
+      ? 'operations'
+      : tabParam === 'reports'
       ? 'reports'
       : tabParam === 'users'
       ? 'team'
@@ -78,17 +82,19 @@ export const AdminDashboardPage: React.FC = () => {
   );
 
   useEffect(() => {
-    if (tabParam === 'reports') setAdminTab('reports');
+    if (tabParam === 'operations') setAdminTab('operations');
+    else if (tabParam === 'reports') setAdminTab('reports');
     else if (tabParam === 'users') setAdminTab('team');
     else if (tabParam === 'audit') setAdminTab('audit');
     else if (tabParam === 'sla') setAdminTab('sla');
   }, [tabParam]);
 
   const handleTabChange = (
-    tab: 'overview' | 'reports' | 'team' | 'reassign' | 'sla' | 'settings' | 'audit'
+    tab: 'overview' | 'operations' | 'reports' | 'team' | 'reassign' | 'sla' | 'settings' | 'audit'
   ) => {
     setAdminTab(tab);
-    if (tab === 'reports') setSearchParams({ tab: 'reports' });
+    if (tab === 'operations') setSearchParams({ tab: 'operations' });
+    else if (tab === 'reports') setSearchParams({ tab: 'reports' });
     else if (tab === 'team') setSearchParams({ tab: 'users' });
     else if (tab === 'audit') setSearchParams({ tab: 'audit' });
     else if (tab === 'sla') setSearchParams({ tab: 'sla' });
@@ -345,6 +351,12 @@ export const AdminDashboardPage: React.FC = () => {
       icon: <Building2 className="w-4 h-4 text-brand-400" />,
     },
     {
+      id: 'operations',
+      label: 'Operational Intelligence',
+      icon: <Cpu className="w-4 h-4 text-emerald-400" />,
+      badge: { text: 'Phase 5', variant: 'info' as const },
+    },
+    {
       id: 'reports',
       label: 'Team Lead Escalations',
       icon: <ClipboardList className="w-4 h-4 text-rose-400" />,
@@ -541,6 +553,11 @@ export const AdminDashboardPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB: OPERATIONAL INTELLIGENCE & BOTTLENECK RADAR (PHASE 5) */}
+      {adminTab === 'operations' && (
+        <OperationalIntelligenceTab userRole="admin" />
       )}
 
       {/* TAB: TEAM LEAD REPORTS & OPERATIONAL ESCALATIONS */}

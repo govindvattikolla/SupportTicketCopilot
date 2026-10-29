@@ -24,6 +24,7 @@ export interface ITicket extends Document {
   resolvedAt?: Date;
   closedAt?: Date;
   sla?: ITicketSLA;
+  awaitingEngineering?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -125,6 +126,11 @@ const TicketSchema = new Schema<ITicket>(
           pausedBusinessMinutes: { type: Number, default: 0 },
         },
       ],
+    },
+    awaitingEngineering: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
   },
   {

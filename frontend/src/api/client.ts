@@ -866,5 +866,272 @@ export const updateWorkspaceSLASettingsApi = async (
   });
 };
 
+// ============================================================================
+// PHASE 5: EXPLAINABLE OPERATIONAL INTELLIGENCE
+// ============================================================================
+
+export type UrgencyTier = 'critical' | 'high' | 'medium' | 'low';
+
+export interface UrgencyFactor {
+  name: 'Priority Weight' | 'Waiting Time' | 'SLA Pressure' | 'Assignment State';
+  score: number;
+  maxScore: number;
+  details: string;
+}
+
+export interface RankedTicket {
+  ticketId: string;
+  ticketNumber: string;
+  subject: string;
+  category: TicketCategory;
+  originalPriority: TicketPriority; // Keep original priority separate from attention score
+  status: TicketStatus;
+  assignedTo?: {
+    _id: string;
+    name: string;
+    email: string;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+  waitingHours: number;
+  slaRemainingMinutes: number | null;
+  isSlaBreached: boolean;
+  attentionScore: number;
+  urgencyTier: UrgencyTier;
+  factors: UrgencyFactor[];
+  explanation: string;
+}
+
+export interface UrgencyRankingResult {
+  totalAnalyzed: number;
+  tierCounts: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  tickets: RankedTicket[];
+}
+
+export interface AgentRecommendationFactor {
+  name: 'Expertise Match' | 'Workload Bandwidth' | 'Availability Status';
+  score: number;
+  maxScore: number;
+  details: string;
+}
+
+export interface AgentRecommendation {
+  agent: {
+    _id: string;
+    name: string;
+    email: string;
+    role: string;
+    skills: string[];
+    maxCapacity: number;
+  };
+  activeTicketCount: number;
+  capacityUtilizationPercent: number;
+  matchScore: number;
+  isRecommended: boolean;
+  factors: AgentRecommendationFactor[];
+  explanation: string;
+}
+
+export interface AgentRecommendationResult {
+  ticket: {
+    _id: string;
+    ticketNumber: string;
+    subject: string;
+    category: TicketCategory;
+    priority: TicketPriority;
+    currentAssignee?: {
+      _id: string;
+      name: string;
+    } | null;
+  };
+  recommendations: AgentRecommendation[];
+}
+
+export interface ClusterTicketItem {
+  ticketId: string;
+  ticketNumber: string;
+  subject: string;
+  category: TicketCategory;
+  priority: TicketPriority;
+  status: TicketStatus;
+  createdAt: string;
+  customerEmail: string;
+}
+
+export interface RecurringIssueCluster {
+  clusterId: string;
+  category: TicketCategory;
+  themeTitle: string;
+  ticketCount: number;
+  tickets: ClusterTicketItem[];
+  sharedKeywords: string[];
+  averageSimilarity: number;
+  highestPriority: TicketPriority;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  isPotentialIncident: boolean;
+  disclaimer: string;
+  recommendedAction: string;
+}
+
+export interface RecurringIssuesResult {
+  totalClusters: number;
+  potentialIncidentCount: number;
+  totalTicketsClustered: number;
+  methodology: {
+    algorithm: string;
+    similarityMetric: string;
+    similarityThreshold: number;
+    llmEmployed: boolean;
+    nonLlmRationale: {
+      cost: string;
+      privacy: string;
+      failureHandling: string;
+      explainability: string;
+    };
+  };
+  clusters: RecurringIssueCluster[];
+}
+
+export interface UnassignedBottleneck {
+  totalCount: number;
+  avgWaitingHours: number;
+  maxWaitingHours: number;
+  byPriority: Record<TicketPriority, number>;
+  oldestTickets: {
+    ticketId: string;
+    ticketNumber: string;
+    subject: string;
+    priority: TicketPriority;
+    waitingHours: number;
+  }[];
+}
+
+export interface PendingCustomerBottleneck {
+  totalCount: number;
+  avgPendingHours: number;
+  staleCount: number;
+  tickets: {
+    ticketId: string;
+    ticketNumber: string;
+    subject: string;
+    pendingHours: number;
+    customerEmail: string;
+  }[];
+}
+
+export interface EngineeringBottleneck {
+  totalCount: number;
+  avgAgeHours: number;
+  byPriority: Record<TicketPriority, number>;
+  tickets: {
+    ticketId: string;
+    ticketNumber: string;
+    subject: string;
+    category: TicketCategory;
+    priority: TicketPriority;
+    status: TicketStatus;
+    reason: string;
+  }[];
+}
+
+export interface SLABreachBottleneck {
+  totalBreached: number;
+  firstResponseBreached: number;
+  resolutionBreached: number;
+  bothBreached: number;
+  byPriority: Record<TicketPriority, number>;
+  byAgent: {
+    agentId: string | null;
+    agentName: string;
+    breachCount: number;
+  }[];
+}
+
+export interface AgentWorkloadMetric {
+  agentId: string;
+  name: string;
+  email: string;
+  role: string;
+  activeTickets: number;
+  maxCapacity: number;
+  loadRatio: number;
+  isOverloaded: boolean;
+  isUnderutilized: boolean;
+}
+
+export interface WorkloadImbalanceMetric {
+  totalActiveAgents: number;
+  totalActiveTickets: number;
+  meanActiveTickets: number;
+  standardDeviation: number;
+  imbalanceRatio: number;
+  status: 'balanced' | 'moderate_imbalance' | 'severe_imbalance';
+  overloadedAgents: AgentWorkloadMetric[];
+  underutilizedAgents: AgentWorkloadMetric[];
+  agentDistribution: AgentWorkloadMetric[];
+  explanation: string;
+}
+
+export interface BottleneckAnalyticsResult {
+  workspaceId: string;
+  timestamp: string;
+  summary: {
+    unassignedCount: number;
+    waitingCustomerCount: number;
+    awaitingEngineeringCount: number;
+    slaBreachCount: number;
+    workloadImbalanceStatus: 'balanced' | 'moderate_imbalance' | 'severe_imbalance';
+  };
+  unassigned: UnassignedBottleneck;
+  waitingForCustomer: PendingCustomerBottleneck;
+  awaitingEngineering: EngineeringBottleneck;
+  slaBreaches: SLABreachBottleneck;
+  workloadImbalance: WorkloadImbalanceMetric;
+}
+
+export const getUrgencyRankingApi = async (params?: {
+  status?: string;
+  assignedTo?: string;
+  urgencyTier?: string;
+  limit?: number;
+}): Promise<UrgencyRankingResult> => {
+  const query = new URLSearchParams();
+  if (params?.status) query.set('status', params.status);
+  if (params?.assignedTo) query.set('assignedTo', params.assignedTo);
+  if (params?.urgencyTier) query.set('urgencyTier', params.urgencyTier);
+  if (params?.limit) query.set('limit', params.limit.toString());
+  const queryString = query.toString() ? `?${query.toString()}` : '';
+  return apiClient<UrgencyRankingResult>(`/api/operations/urgency-ranking${queryString}`);
+};
+
+export const getAgentRecommendationsApi = async (
+  ticketId: string
+): Promise<AgentRecommendationResult> => {
+  return apiClient<AgentRecommendationResult>(`/api/operations/recommendations/${ticketId}`);
+};
+
+export const getRecurringIssuesApi = async (params?: {
+  daysLookback?: number;
+  category?: string;
+  similarityThreshold?: number;
+}): Promise<RecurringIssuesResult> => {
+  const query = new URLSearchParams();
+  if (params?.daysLookback) query.set('daysLookback', params.daysLookback.toString());
+  if (params?.category) query.set('category', params.category);
+  if (params?.similarityThreshold) query.set('similarityThreshold', params.similarityThreshold.toString());
+  const queryString = query.toString() ? `?${query.toString()}` : '';
+  return apiClient<RecurringIssuesResult>(`/api/operations/recurring-issues${queryString}`);
+};
+
+export const getBottleneckAnalyticsApi = async (): Promise<BottleneckAnalyticsResult> => {
+  return apiClient<BottleneckAnalyticsResult>('/api/operations/bottlenecks');
+};
+
 
 

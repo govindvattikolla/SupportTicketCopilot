@@ -48,16 +48,20 @@ import {
   CheckCircle,
   ExternalLink,
   ShieldAlert,
+  Cpu,
 } from 'lucide-react';
+import { OperationalIntelligenceTab } from '../components/OperationalIntelligenceTab';
 
 export const TeamLeadDashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Active top-level section: 'workload' | 'queries' | 'admin_reports'
+  // Active top-level section: 'workload' | 'queries' | 'admin_reports' | 'operations'
   const tabParam = searchParams.get('tab');
-  const [activeSection, setActiveSection] = useState<'workload' | 'queries' | 'admin_reports'>(
-    tabParam === 'admin_reports'
+  const [activeSection, setActiveSection] = useState<'workload' | 'queries' | 'admin_reports' | 'operations'>(
+    tabParam === 'operations'
+      ? 'operations'
+      : tabParam === 'admin_reports'
       ? 'admin_reports'
       : tabParam === 'queries'
       ? 'queries'
@@ -65,14 +69,16 @@ export const TeamLeadDashboardPage: React.FC = () => {
   );
 
   useEffect(() => {
-    if (tabParam === 'admin_reports') {
+    if (tabParam === 'operations') {
+      setActiveSection('operations');
+    } else if (tabParam === 'admin_reports') {
       setActiveSection('admin_reports');
     } else if (tabParam === 'queries') {
       setActiveSection('queries');
     }
   }, [tabParam]);
 
-  const handleSectionChange = (section: 'workload' | 'queries' | 'admin_reports') => {
+  const handleSectionChange = (section: 'workload' | 'queries' | 'admin_reports' | 'operations') => {
     setActiveSection(section);
     if (section === 'workload') {
       setSearchParams({});
@@ -320,6 +326,12 @@ export const TeamLeadDashboardPage: React.FC = () => {
         (queriesResult?.summary?.open || 0) > 0
           ? { text: `${queriesResult?.summary?.open} Open`, variant: 'warning' as const }
           : undefined,
+    },
+    {
+      id: 'operations',
+      label: 'Operational Intelligence',
+      icon: <Cpu className="w-4 h-4 text-emerald-400" />,
+      badge: { text: 'Phase 5', variant: 'info' as const },
     },
     {
       id: 'admin_reports',
@@ -1128,6 +1140,13 @@ export const TeamLeadDashboardPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* SECTION 4: OPERATIONAL INTELLIGENCE & BOTTLENECK RADAR */}
+      {/* ===================================================================== */}
+      {activeSection === 'operations' && (
+        <OperationalIntelligenceTab userRole="lead" />
       )}
 
       {/* ===================================================================== */}

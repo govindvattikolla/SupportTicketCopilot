@@ -11,6 +11,8 @@ export interface IUser extends Document {
   passwordHash: string;
   role: UserRole;
   isActive: boolean;
+  skills?: string[];
+  maxCapacity?: number;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidate: string): Promise<boolean>;
@@ -51,6 +53,14 @@ const UserSchema = new Schema<IUser>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    skills: {
+      type: [String],
+      default: [],
+    },
+    maxCapacity: {
+      type: Number,
+      default: 5,
     },
   },
   {

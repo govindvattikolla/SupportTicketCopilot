@@ -1,0 +1,226 @@
+================================================================================
+SUPPORTFLOW - PHASE 5 IMPLEMENTATION REVIEW & ARCHITECTURE SPECIFICATION
+================================================================================
+Generated: 2026-10-29
+Author: SupportFlow Engineering Team
+Phase: Phase 5 - Explainable Operational Intelligence: Urgency Ranking, Workload-Aware Agent Recommendations, Recurring Incident Clustering & Bottleneck Radar
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Phase 5 equips SupportFlow with production-grade, explainable operational intelligence.
+Without black-box models or third-party AI dependencies, it delivers deterministic,
+transparent, real-time guidance directly computed from live database transactions:
+
+1. Urgency Ranking & Attention Score Engine:
+   - Attention Score (0–100) dynamically synthesized from four explainable factors:
+     * Priority Base Weight: P1 (40 pts), P2 (25 pts), P3 (15 pts), P4 (5 pts).
+     * Customer Waiting Time: Hours elapsed without staff response scaled up to 25 pts.
+     * Remaining SLA Time & Pressure: Breached commitments (+30 pts), critical upcoming
+       deadlines <1h (+20 pts), <4h (+12 pts), on track (+3 pts).
+     * Assignment State: Unassigned tickets requiring triage receive an attention boost (+15 pts).
+   - Strict Separation: The original ticket priority (P1–P4) is maintained strictly separate
+     from the calculated attention score in both MongoDB schemas and UI representations.
+   - Explainability: Every score returns a structured factor breakdown and plain-English narrative.
+
+2. Workload-Aware Agent Recommendations:
+   - Matches tickets to the best-suited active staff members using three clear dimensions:
+     * Expertise Factor (0–40 pts): Match against agent's designated category skills and historical
+       resolution volume within that category.
+     * Workload Bandwidth Factor (0–40 pts): Real-time aggregation of active tickets (open, in_progress)
+       measured against agent maximum capacity (idle=40 pts, light load=35 pts, moderate=20-28 pts, at capacity=0 pts).
+     * Availability Factor (0–20 pts): Eligibility based on active duty status (isActive: true).
+   - Explainability: Full factor scores, utilization percentages, and human-readable explanation
+     provided for every candidate agent. Leads and Admins can assign directly from recommendations.
+
+3. Recurring-Issue Detection & Incident Clustering:
+   - Employs deterministic text normalization and Jaccard token similarity (|A ∩ B| / |A ∪ B|)
+     partitioned across structured categories ('technical', 'billing', 'bug', etc.).
+   - Incident Cluster Hygiene:
+     * Potential Incident Classification: Every cluster with ≥2 correlated tickets is classified
+       as a Potential Incident requiring human review.
+     * Strict Causality Disclaimer: Does not claim that text similarity proves tickets share a root cause.
+       Explicitly states that text overlap flags correlated symptoms and wording, requiring manual technical
+       verification before declaring a shared defect or outage.
+   - Non-LLM Architecture Justification:
+     * Cost: Zero token fees, zero third-party API costs, and zero GPU infrastructure overhead.
+     * Privacy: Full data sovereignty — customer tickets and PII never leave the tenant database.
+     * Failure Handling: 100% offline uptime, zero network latency, and no third-party rate-limiting.
+     * Explainability: Transparent shared keyword tokens explain exactly why tickets were clustered.
+
+4. Bottleneck Analytics Radar:
+   - High-performance MongoDB aggregations analyzing 5 operational bottleneck dimensions:
+     * Unassigned Tickets: Total count, average/max triage waiting hours, priority breakdown, oldest items.
+     * Tickets Waiting for Customers: Count in 'pending' status, average pending hours, and stale tickets (>72h).
+     * Tickets Awaiting Engineering: Software bugs, explicit engineering flags, and active technical queries.
+     * SLA Breaches: Real-time count of first-response vs resolution breaches, broken down by priority and agent.
+     * Workload Imbalance: Computes mean active tickets (μ), variance, standard deviation (σ), and max/min
+       imbalance ratio, automatically classifying workload state ('balanced', 'moderate_imbalance', 'severe_imbalance')
+       and identifying overloaded vs underutilized agents with actionable rebalancing advice.
+
+Verification Metrics:
+- 74/74 automated tests passing across 8 Vitest test suites (100% green).
+- Clean TypeScript verification with zero errors across backend and frontend (`npm run typecheck`).
+- Production bundles built cleanly with zero errors (`npm run build`).
+
+--------------------------------------------------------------------------------
+2. WORKFLOW FROM FRONTEND TO EXPRESS API TO SERVICE TO MONGODB AND BACK
+--------------------------------------------------------------------------------
+
+A. URGENCY RANKING & ATTENTION SCORING:
+   1. Frontend (`OperationalIntelligenceTab` or `AgentDashboardPage`) queries `GET /api/operations/urgency-ranking`.
+   2. Auth Middleware verifies JWT and staff role (`agent`, `lead`, `admin`).
+   3. Service Layer (`urgencyRanking.service.ts`):
+      - Fetches active tickets scoped strictly to `workspaceId`.
+      - Computes `calculateWaitingTimeScore()`, `calculateSLAPressureScore()`, and `calculateAssignmentScore()`.
+      - Combines factors into `attentionScore` (0-100) and assigns `urgencyTier` ('critical', 'high', 'medium', 'low').
+      - Compiles structured `factors` array and human-readable `explanation`.
+      - Sorts tickets by `attentionScore` descending while preserving `originalPriority` untouched.
+   4. Frontend renders `AttentionScoreBadge` alongside `PriorityBadge` with interactive explanation popovers.
+
+B. WORKLOAD-AWARE AGENT RECOMMENDATIONS:
+   1. User opens a ticket (`/agent/tickets/:id`) or clicks "Match Agent" in the Urgency Queue.
+   2. Frontend calls `GET /api/operations/recommendations/:ticketId`.
+   3. Service Layer (`agentRecommendation.service.ts`):
+      - Reads ticket category and priority from MongoDB.
+      - Finds all active workspace staff (`role: { $in: ['agent', 'lead'] }, isActive: true`).
+      - Runs MongoDB aggregation for active ticket counts per agent.
+      - Runs MongoDB aggregation for historical resolved tickets per agent in this category.
+      - Computes expertise, workload bandwidth, and availability scores for each candidate.
+      - Ranks candidates by `matchScore` descending and flags the top match with `isRecommended = true`.
+   4. Leads and Admins click "Assign to Agent", triggering `PATCH /api/tickets/:id/assign`,
+      broadcasting real-time Socket.IO events and dispatching in-app notifications.
+
+C. RECURRING-ISSUE DETECTION & CLUSTERING:
+   1. Frontend queries `GET /api/operations/recurring-issues?daysLookback=30`.
+   2. Service Layer (`clustering.service.ts`):
+      - Queries recent tickets matching tenant `workspaceId`.
+      - Groups tickets by structured category (`technical`, `billing`, `bug`, etc.).
+      - Tokenizes text (subject + description), stripping stop words, numbers, and short terms.
+      - Calculates pairwise Jaccard token similarity |A ∩ B| / |A ∪ B|.
+      - Forms connected components for pairs exceeding the similarity threshold.
+      - Filters out singletons (retains clusters with ≥2 tickets).
+      - Extracts top shared keywords, first/last seen timestamps, and average similarity.
+      - Enforces the non-causality disclaimer: "Potential incident requiring human review. Text similarity
+        indicates correlated patterns, not proven shared cause."
+   3. Frontend renders interactive cluster cards with shared keyword pills, correlated ticket lists,
+      and non-LLM methodology transparency.
+
+D. BOTTLENECK RADAR ANALYTICS:
+   1. Frontend queries `GET /api/operations/bottlenecks`.
+   2. Service Layer (`bottleneckAnalytics.service.ts`):
+      - Executes parallel aggregation pipelines across the 5 operational dimensions.
+      - Calculates mathematical workload variance: mean μ = T / N, standard deviation σ = sqrt(Σ(x - μ)² / N).
+      - Classifies balance status and pinpoints overloaded/underutilized personnel.
+   3. Frontend renders radar dashboard with real-time StatCards, breakdown tables, and rebalancing guidance.
+
+--------------------------------------------------------------------------------
+3. INVENTORY OF NEW AND MODIFIED FILES
+--------------------------------------------------------------------------------
+
+BACKEND:
+- `backend/src/modules/operations/operations.types.ts` (NEW):
+  TypeScript domain contracts for UrgencyRanking, RankedTicket, AgentRecommendation,
+  RecurringIssueCluster, and BottleneckAnalytics.
+- `backend/src/modules/operations/urgencyRanking.service.ts` (NEW):
+  Urgency calculation engine evaluating priority weights, customer wait times, SLA pressure,
+  and assignment states with full explainability.
+- `backend/src/modules/operations/agentRecommendation.service.ts` (NEW):
+  Workload-aware agent recommendation algorithm using real MongoDB aggregations for active
+  ticket loads, capacity utilization, and category resolution track records.
+- `backend/src/modules/operations/clustering.service.ts` (NEW):
+  Deterministic, category-partitioned Jaccard text similarity clustering and potential
+  incident detection with human-review disclaimers.
+- `backend/src/modules/operations/bottleneckAnalytics.service.ts` (NEW):
+  High-performance aggregation pipelines analyzing unassigned triage, customer wait times,
+  engineering blockers, SLA breaches, and workload standard deviation.
+- `backend/src/modules/operations/operations.controller.ts` (NEW):
+  HTTP request controllers with parameter validation and standardized envelope responses.
+- `backend/src/modules/operations/operations.routes.ts` (NEW):
+  Express router mounted with JWT authentication and role-based access control.
+- `backend/src/modules/users/user.model.ts` (MODIFIED):
+  Extended schema with optional `skills` (category specialization array) and `maxCapacity`.
+- `backend/src/modules/tickets/ticket.model.ts` (MODIFIED):
+  Extended schema with optional `awaitingEngineering` indexing.
+- `backend/src/modules/tickets/ticket.service.ts` (MODIFIED):
+  Cleaned strict MessageType type guard.
+- `backend/src/app.ts` (MODIFIED):
+  Registered `/api/operations` route.
+- `backend/src/scripts/seed.ts` (MODIFIED):
+  Seeded agent skills, capacity values, and sample correlated tickets (TCK-1002, TCK-1008)
+  for realistic clustering demonstration.
+- `backend/tests/operations.test.ts` (NEW, 14 tests):
+  Comprehensive Vitest suite testing urgency ranking factors, agent recommendation rules,
+  recurring issue clustering, bottleneck aggregates, and cross-workspace isolation.
+
+FRONTEND:
+- `frontend/src/api/client.ts` (MODIFIED):
+  Added TypeScript interfaces and typed API functions (`getUrgencyRankingApi`,
+  `getAgentRecommendationsApi`, `getRecurringIssuesApi`, `getBottleneckAnalyticsApi`).
+- `frontend/src/components/Badges.tsx` (MODIFIED):
+  Added `AttentionScoreBadge` with critical, high, medium, and low urgency tier color coding.
+- `frontend/src/components/AgentRecommendationCard.tsx` (NEW):
+  Sidebar copilot card for Ticket Details displaying attention score, factor breakdown,
+  and ranked candidate agents with one-click assignment.
+- `frontend/src/components/OperationalIntelligenceTab.tsx` (NEW):
+  Full-featured operational dashboard tab with 4 views: Urgency Ranking Queue, Bottleneck Radar,
+  Workload Imbalance Inspector, and Recurring Incidents Console.
+- `frontend/src/pages/TeamLeadDashboardPage.tsx` (MODIFIED):
+  Added "Operational Intelligence" tab with quick agent reassignment workflow.
+- `frontend/src/pages/AdminDashboardPage.tsx` (MODIFIED):
+  Added "Operational Intelligence" tab in Admin portal.
+- `frontend/src/pages/TicketDetailPage.tsx` (MODIFIED):
+  Embedded `AgentRecommendationCard` in right sidebar.
+- `frontend/src/pages/AgentDashboardPage.tsx` (MODIFIED):
+  Rendered `AttentionScoreBadge` alongside `PriorityBadge` in agent ticket queues.
+
+--------------------------------------------------------------------------------
+4. CODE CLEANLINESS, DEPENDENCY & SECURITY AUDIT
+--------------------------------------------------------------------------------
+1. Zero Black-Box LLM / Embedding Overhead:
+   - Evaluated against user instructions: No LLM, vectors, or third-party embeddings introduced.
+   - Cost: $0 API token expense.
+   - Privacy: Zero PII leaves the local MongoDB database.
+   - Failure Handling: Zero network dependency on external AI model APIs; 100% deterministic and offline-capable.
+   - Simpler Alternative: Category-partitioned token normalization + Jaccard similarity provides fully
+     explainable, auditable keyword matching.
+2. Tenant Isolation:
+   - Every operational query strictly enforces `workspaceId: req.user.workspaceId`.
+   - Verified in automated tests: Workspace B tickets are never included in Workspace A's
+     urgency rankings, bottleneck analytics, or agent recommendations.
+3. Priority Preservation:
+   - Original ticket priority (`P1`, `P2`, `P3`, `P4`) is untouched and strictly separate from
+     the operational attention score (0-100).
+4. Incident Cluster Responsibility:
+   - Issue clusters explicitly carry the disclaimer that text similarity indicates correlated
+     patterns rather than confirmed shared root cause, avoiding false automation claims.
+
+--------------------------------------------------------------------------------
+5. HANDS-ON VERIFICATION CHECKLIST FOR USER
+--------------------------------------------------------------------------------
+[ ] 1. Run Automated Test Suite:
+       In `backend/`, run `npm test`. Verify all 8 test files and 74 tests pass.
+[ ] 2. Run Strict TypeScript Verification:
+       From root, run `npm run typecheck`. Verify 0 errors across backend and frontend.
+[ ] 3. Verify Production Build:
+       From root, run `npm run build`. Verify successful bundle output.
+[ ] 4. Explore Operational Intelligence as Team Lead:
+       - Log in as Team Lead (`lead@supportflow.com` / `Password123!`).
+       - Click "Operational Intelligence" in the left sidebar.
+       - View Urgency Ranking Queue: observe Attention Score pills (Critical, High, Medium, Low),
+         expandable factor explanations, and the separate Original Priority badges.
+       - Click "Match Agent" on an unassigned ticket: verify workload-aware recommendations appear
+         with match percentages, active ticket counts, and one-click assign button.
+       - Click "Bottleneck Radar": inspect the 5 dimensions (Unassigned, Waiting on Customer,
+         Awaiting Engineering, SLA Breaches, Workload Imbalance).
+       - Click "Workload Imbalance Inspector": review agent capacity utilization and standard deviation.
+       - Click "Recurring Issues & Incidents": view detected clusters, shared keyword pills,
+         and the required human-review disclaimer.
+[ ] 5. Test Ticket Detail Operational Copilot:
+       - Open any ticket (e.g. `/agent/tickets/:id`).
+       - In the right sidebar, observe the "Operational Attention" card showing the Attention Score,
+         factor breakdown toggle, and top recommended assignees with match percentages.
+[ ] 6. Inspect Admin Dashboard:
+       - Log in as Admin (`admin@supportflow.com` / `Password123!`).
+       - Navigate to "Operational Intelligence" tab and verify complete workspace bottleneck radar.
+================================================================================

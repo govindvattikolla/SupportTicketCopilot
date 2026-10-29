@@ -43,6 +43,8 @@ export const seedDatabase = async () => {
       email: 'admin@supportflow.com',
       passwordHash: defaultPasswordHash,
       role: 'admin' as const,
+      skills: ['general', 'billing'],
+      maxCapacity: 10,
     },
     {
       workspaceId: workspace._id,
@@ -50,6 +52,8 @@ export const seedDatabase = async () => {
       email: 'agent@supportflow.com',
       passwordHash: defaultPasswordHash,
       role: 'agent' as const,
+      skills: ['billing', 'general'],
+      maxCapacity: 5,
     },
     {
       workspaceId: workspace._id,
@@ -57,6 +61,17 @@ export const seedDatabase = async () => {
       email: 'lead@supportflow.com',
       passwordHash: defaultPasswordHash,
       role: 'lead' as const,
+      skills: ['technical', 'bug'],
+      maxCapacity: 8,
+    },
+    {
+      workspaceId: workspace._id,
+      name: 'Jordan Tech',
+      email: 'jordan@supportflow.com',
+      passwordHash: defaultPasswordHash,
+      role: 'agent' as const,
+      skills: ['technical', 'bug'],
+      maxCapacity: 5,
     },
   ];
 
@@ -68,9 +83,15 @@ export const seedDatabase = async () => {
       user = await User.create(u);
       console.log(`Created user: ${user.name} (${user.email}) [${user.role}]`);
     } else {
-      console.log(`User ${user.email} already exists.`);
+      user.skills = u.skills;
+      user.maxCapacity = u.maxCapacity;
+      await user.save();
+      console.log(`User ${user.email} updated with skills: ${u.skills.join(', ')}.`);
     }
     createdUsers[u.role] = user;
+    if (u.email === 'jordan@supportflow.com') {
+      createdUsers['agent2'] = user;
+    }
   }
 
   // Seed sample tickets if empty
@@ -169,6 +190,19 @@ export const seedDatabase = async () => {
         status: 'in_progress' as const,
         assignedTo: createdUsers['agent']._id,
         createdAt: new Date(Date.now() - 12 * 60 * 60 * 1000),
+      },
+      {
+        workspaceId: workspace._id,
+        ticketNumber: 'TCK-1008',
+        trackingToken: crypto.randomBytes(32).toString('hex'),
+        customer: { name: 'Kevin Durant', email: 'kevin@streamline.net' },
+        subject: 'Webhook endpoint callbacks timing out after 10s',
+        description:
+          'Webhook deliveries are timing out after 10 seconds on our production webhook endpoint callbacks.',
+        category: 'technical' as const,
+        priority: 'P1' as const,
+        status: 'open' as const,
+        createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000),
       },
     ];
 

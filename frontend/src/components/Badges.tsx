@@ -239,4 +239,62 @@ export const SLABadge: React.FC<{
   }
 };
 
+export const AttentionScoreBadge: React.FC<{
+  score: number;
+  tier?: 'critical' | 'high' | 'medium' | 'low';
+  showLabel?: boolean;
+}> = ({ score, tier, showLabel = true }) => {
+  const calculatedTier =
+    tier || (score >= 75 ? 'critical' : score >= 50 ? 'high' : score >= 25 ? 'medium' : 'low');
+
+  switch (calculatedTier) {
+    case 'critical':
+      return (
+        <span
+          title={`Attention Score: ${score}/100 (Critical Urgency)`}
+          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm shadow-rose-900/20"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span>
+          <span>{score}</span>
+          {showLabel && <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-400/90">Critical</span>}
+        </span>
+      );
+    case 'high':
+      return (
+        <span
+          title={`Attention Score: ${score}/100 (High Urgency)`}
+          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-900/20"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+          <span>{score}</span>
+          {showLabel && <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/90">High</span>}
+        </span>
+      );
+    case 'medium':
+      return (
+        <span
+          title={`Attention Score: ${score}/100 (Medium Urgency)`}
+          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/15 text-blue-300 border border-blue-500/30"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+          <span>{score}</span>
+          {showLabel && <span className="text-[10px] font-medium uppercase tracking-wider text-blue-400/80">Medium</span>}
+        </span>
+      );
+    case 'low':
+    default:
+      return (
+        <span
+          title={`Attention Score: ${score}/100 (Low Urgency)`}
+          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-700/60 text-slate-300 border border-slate-600/50"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+          <span>{score}</span>
+          {showLabel && <span className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Low</span>}
+        </span>
+      );
+  }
+};
+
+
 

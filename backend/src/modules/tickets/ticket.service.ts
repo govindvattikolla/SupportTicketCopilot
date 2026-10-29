@@ -823,8 +823,8 @@ export const addStaffMessage = async (
       workspaceId: workspaceId.toString(),
       userId: ticket.assignedTo.toString(),
       type: 'ticket_reply',
-      title: `New ${type === 'note' ? 'Internal Note' : 'Reply'} on ${ticket.ticketNumber}`,
-      message: `${actor.name} added a ${type === 'note' ? 'private note' : 'reply'} to ${ticket.ticketNumber}.`,
+      title: `New ${type === 'internal_note' ? 'Internal Note' : 'Reply'} on ${ticket.ticketNumber}`,
+      message: `${actor.name} added a ${type === 'internal_note' ? 'private note' : 'reply'} to ${ticket.ticketNumber}.`,
       ticketId: ticket._id.toString(),
       ticketNumber: ticket.ticketNumber,
     });

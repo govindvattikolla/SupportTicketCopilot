@@ -15,6 +15,7 @@ import { auditRoutes } from './modules/audit/audit.routes';
 import ticketQueryRoutes from './modules/ticketQueries/ticketQuery.routes';
 import adminReportRoutes from './modules/adminReports/adminReport.routes';
 import notificationRoutes from './modules/notifications/notification.routes';
+import operationsRoutes from './modules/operations/operations.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { NotFoundError } from './shared/errors/AppError';
 
@@ -56,6 +57,7 @@ export const createApp = (): Application => {
   app.use('/api/ticket-queries', ticketQueryRoutes);
   app.use('/api/admin-reports', adminReportRoutes);
   app.use('/api/notifications', notificationRoutes);
+  app.use('/api/operations', operationsRoutes);
 
   // 404 Handler for undefined routes
   app.use((req: Request, _res: Response, next: NextFunction) => {

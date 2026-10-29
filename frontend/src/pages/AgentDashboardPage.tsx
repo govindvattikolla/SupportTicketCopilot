@@ -13,6 +13,7 @@ import {
   TicketQuery,
   TicketQueryCategory,
   TicketQueryUrgency,
+  getUrgencyRankingApi,
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { StatCard } from '../components/StatCard';
@@ -24,6 +25,7 @@ import {
   UrgencyBadge,
   RoleBadge,
   SLABadge,
+  AttentionScoreBadge,
 } from '../components/Badges';
 import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
@@ -207,6 +209,19 @@ export const AgentDashboardPage: React.FC = () => {
       }),
   });
 
+  // Query 6: Urgency Ranking for Attention Scores
+  const { data: urgencyRankingResult } = useQuery({
+    queryKey: ['urgencyRanking'],
+    queryFn: () => getUrgencyRankingApi({ limit: 150 }),
+  });
+
+  const attentionScoreMap = new Map<string, { score: number; tier: any }>();
+  if (urgencyRankingResult?.tickets) {
+    for (const t of urgencyRankingResult.tickets) {
+      attentionScoreMap.set(t.ticketId, { score: t.attentionScore, tier: t.urgencyTier });
+    }
+  }
+
   // Mutations
   const createQueryMutation = useMutation({
     mutationFn: createTicketQueryApi,
@@ -309,7 +324,16 @@ export const AgentDashboardPage: React.FC = () => {
       </td>
       <td className="py-3 px-4">
         <div className="flex flex-col gap-1 items-start">
-          <PriorityBadge priority={ticket.priority} />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <PriorityBadge priority={ticket.priority} />
+            {attentionScoreMap.has(ticket._id) && (
+              <AttentionScoreBadge
+                score={attentionScoreMap.get(ticket._id)!.score}
+                tier={attentionScoreMap.get(ticket._id)!.tier}
+                showLabel={false}
+              />
+            )}
+          </div>
           {ticket.sla && (
             <SLABadge
               status={

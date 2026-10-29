@@ -28,6 +28,7 @@ import {
   RoleBadge,
   SLABadge,
 } from '../components/Badges';
+import { AgentRecommendationCard } from '../components/AgentRecommendationCard';
 import {
   ArrowLeft,
   Send,
@@ -672,6 +673,15 @@ export const TicketDetailPage: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Phase 5: Operational Intelligence & Recommendations Card */}
+          <AgentRecommendationCard
+            ticketId={id!}
+            userRole={user?.role}
+            onAssigned={() => {
+              refetchTicketQueries();
+            }}
+          />
 
           {/* SLA Tracking & Deadlines Card */}
           <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-5 shadow-lg">
