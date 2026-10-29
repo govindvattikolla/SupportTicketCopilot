@@ -6,6 +6,15 @@ import { AuditEvent, IAuditEvent } from '../audit/audit.model';
 import { Workspace } from '../workspaces/workspace.model';
 import { User } from '../users/user.model';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../shared/errors/AppError';
+import {
+  calculateInitialSLADeadlines,
+  calculateBusinessMinutesElapsed,
+  evaluateTicketSLA,
+  DEFAULT_SLA_SETTINGS,
+} from '../sla/slaEngine';
+import { SLAEvaluationResult } from '../sla/sla.types';
+import { queueSlaCheckJob, queueNotificationJob } from '../../jobs/queues';
+import { emitToWorkspace, emitToTicket, emitToUser } from '../../realtime/socket';
 
 // Valid ticket status transitions
 export const VALID_STATUS_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
@@ -61,6 +70,17 @@ export const createPublicTicket = async (
   const ticketNumber = `TCK-${counter}`;
   const trackingToken = crypto.randomBytes(32).toString('hex');
 
+  const priority = dto.priority || workspace.settings?.defaultPriority || 'P3';
+  const slaSettings = workspace.settings?.slaSettings || DEFAULT_SLA_SETTINGS;
+  const now = new Date();
+
+  // Compute SLA deadlines using business hours
+  const { firstResponseDeadline, resolutionDeadline } = calculateInitialSLADeadlines(
+    now,
+    priority as any,
+    slaSettings
+  );
+
   const ticket = await Ticket.create({
     workspaceId: workspace._id,
     ticketNumber,
@@ -72,8 +92,18 @@ export const createPublicTicket = async (
     subject: dto.subject.trim(),
     description: dto.description.trim(),
     category: dto.category || 'general',
-    priority: dto.priority || workspace.settings?.defaultPriority || 'P3',
+    priority,
     status: 'open',
+    sla: {
+      firstResponseDeadline,
+      resolutionDeadline,
+      isFirstResponseBreached: false,
+      isResolutionBreached: false,
+      isWarningSent: false,
+      isEscalated: false,
+      totalPausedMinutes: 0,
+      pauseHistory: [],
+    },
   });
 
   // Record initial audit event
@@ -89,8 +119,18 @@ export const createPublicTicket = async (
       ticketNumber,
       category: ticket.category,
       priority: ticket.priority,
+      slaDeadlines: {
+        firstResponse: firstResponseDeadline,
+        resolution: resolutionDeadline,
+      },
     },
   });
+
+  // Real-time broadcast to workspace
+  emitToWorkspace(workspace._id, 'ticket:created', { ticket });
+
+  // Enqueue background SLA check
+  await queueSlaCheckJob(ticket._id.toString());
 
   return { ticket, trackingToken };
 };
@@ -109,47 +149,68 @@ export const getTicketByTrackingToken = async (
     type: 'reply',
   })
     .sort({ createdAt: 1 })
-    .select('_id type sender content createdAt');
+    .select('-__v');
 
   return { ticket, messages };
 };
 
-export const addCustomerMessage = async (
+export const addCustomerReply = async (
   trackingToken: string,
   content: string
-): Promise<IMessage> => {
+): Promise<{ message: IMessage; ticket: ITicket }> => {
   const ticket = await Ticket.findOne({ trackingToken });
   if (!ticket) {
     throw new NotFoundError('Invalid tracking token or ticket does not exist');
   }
 
-  if (!content || !content.trim()) {
-    throw new BadRequestError('Message content cannot be empty');
-  }
-
-  // Check if ticket was resolved: customer reply may reopen it
-  const workspace = await Workspace.findById(ticket.workspaceId);
-  const allowReopen = workspace?.settings?.allowCustomerReopen ?? true;
-
-  if (ticket.status === 'resolved' && allowReopen) {
+  if (ticket.status === 'closed') {
+    const workspace = await Workspace.findById(ticket.workspaceId);
+    if (!workspace?.settings?.allowCustomerReopen) {
+      throw new ForbiddenError('This ticket is closed and the workspace does not permit customer reopening');
+    }
     ticket.status = 'open';
-    await ticket.save();
-
-    await AuditEvent.create({
-      ticketId: ticket._id,
-      workspaceId: ticket.workspaceId,
-      actor: {
-        type: 'customer',
-        name: ticket.customer.name,
-      },
-      action: 'ticket_reopened_by_customer',
-      details: {
-        from: 'resolved',
-        to: 'open',
-        reason: 'Customer follow-up message submitted',
-      },
-    });
+    ticket.closedAt = undefined;
+  } else if (ticket.status === 'resolved') {
+    ticket.status = 'open';
+  } else if (ticket.status === 'pending') {
+    // If ticket was pending (waiting on customer), transition back to in_progress and resume SLA clock
+    ticket.status = 'in_progress';
   }
+
+  const now = new Date();
+
+  // If resuming from pending state, adjust SLA deadlines
+  if (ticket.sla?.pausedAt) {
+    const workspace = await Workspace.findById(ticket.workspaceId);
+    const slaSettings = workspace?.settings?.slaSettings || DEFAULT_SLA_SETTINGS;
+    const pausedMinutes = calculateBusinessMinutesElapsed(
+      ticket.sla.pausedAt,
+      now,
+      slaSettings.businessHours
+    );
+
+    if (ticket.sla.firstResponseDeadline) {
+      ticket.sla.firstResponseDeadline = new Date(
+        ticket.sla.firstResponseDeadline.getTime() + pausedMinutes * 60000
+      );
+    }
+    if (ticket.sla.resolutionDeadline) {
+      ticket.sla.resolutionDeadline = new Date(
+        ticket.sla.resolutionDeadline.getTime() + pausedMinutes * 60000
+      );
+    }
+    ticket.sla.totalPausedMinutes = (ticket.sla.totalPausedMinutes || 0) + pausedMinutes;
+    if (ticket.sla.pauseHistory.length > 0) {
+      const lastEntry = ticket.sla.pauseHistory[ticket.sla.pauseHistory.length - 1];
+      if (!lastEntry.resumedAt) {
+        lastEntry.resumedAt = now;
+        lastEntry.pausedBusinessMinutes = pausedMinutes;
+      }
+    }
+    ticket.sla.pausedAt = undefined;
+  }
+
+  await ticket.save();
 
   const message = await Message.create({
     ticketId: ticket._id,
@@ -170,14 +231,41 @@ export const addCustomerMessage = async (
       type: 'customer',
       name: ticket.customer.name,
     },
-    action: 'reply_added',
+    action: 'customer_reply_added',
     details: { messageId: message._id },
   });
 
-  return message;
+  // Real-time broadcast
+  emitToWorkspace(ticket.workspaceId, 'ticket:reply', {
+    ticketId: ticket._id,
+    ticketNumber: ticket.ticketNumber,
+    message,
+  });
+  emitToTicket(ticket._id, 'ticket:reply', {
+    ticketId: ticket._id,
+    message,
+  });
+
+  // Notify assigned agent about customer reply
+  if (ticket.assignedTo) {
+    await queueNotificationJob({
+      workspaceId: ticket.workspaceId.toString(),
+      userId: ticket.assignedTo.toString(),
+      type: 'ticket_reply',
+      title: `Customer Reply: ${ticket.ticketNumber}`,
+      message: `${ticket.customer.name} replied to ticket ${ticket.ticketNumber}: "${content.substring(0, 80)}..."`,
+      ticketId: ticket._id.toString(),
+      ticketNumber: ticket.ticketNumber,
+      sendEmail: true,
+    });
+  }
+
+  // Enqueue SLA check
+  await queueSlaCheckJob(ticket._id.toString());
+
+  return { message, ticket };
 };
 
-// Staff Service Methods (Workspace-Scoped)
 export interface ListTicketsQuery {
   status?: string;
   priority?: string;
@@ -192,7 +280,7 @@ export interface ListTicketsQuery {
   sortOrder?: 'asc' | 'desc';
 }
 
-export const getOverdueFilter = () => {
+export const getOverdueFilter = (): any => {
   const now = new Date();
   const h4Ago = new Date(now.getTime() - 4 * 60 * 60 * 1000);
   const h24Ago = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -202,6 +290,8 @@ export const getOverdueFilter = () => {
   return {
     status: { $in: ['open', 'in_progress', 'pending'] },
     $or: [
+      { 'sla.resolutionDeadline': { $lt: now } },
+      { 'sla.isResolutionBreached': true },
       { priority: 'P1', createdAt: { $lt: h4Ago } },
       { priority: 'P2', createdAt: { $lt: h24Ago } },
       { priority: 'P3', createdAt: { $lt: h48Ago } },
@@ -209,6 +299,8 @@ export const getOverdueFilter = () => {
     ],
   };
 };
+
+export const addCustomerMessage = addCustomerReply;
 
 export const listWorkspaceTickets = async (
   workspaceId: Types.ObjectId,
@@ -295,28 +387,35 @@ export const listWorkspaceTickets = async (
 export const getWorkspaceTicketDetails = async (
   workspaceId: Types.ObjectId,
   ticketId: string
-): Promise<{ ticket: ITicket; messages: IMessage[]; auditEvents: IAuditEvent[] }> => {
+): Promise<{
+  ticket: ITicket;
+  messages: IMessage[];
+  auditEvents: IAuditEvent[];
+  slaEvaluation: SLAEvaluationResult;
+}> => {
   if (!Types.ObjectId.isValid(ticketId)) {
     throw new BadRequestError('Invalid ticket identifier');
   }
 
   // Strictly enforce workspace isolation
-  const ticket = await Ticket.findOne({ _id: ticketId, workspaceId }).populate(
-    'assignedTo',
-    '_id name email role'
-  );
+  const [ticket, workspace] = await Promise.all([
+    Ticket.findOne({ _id: ticketId, workspaceId }).populate('assignedTo', '_id name email role'),
+    Workspace.findById(workspaceId),
+  ]);
 
   if (!ticket) {
     throw new NotFoundError('Ticket not found in this workspace');
   }
 
-  // Staff sees all messages: both public replies and private internal notes
+  const slaSettings = workspace?.settings?.slaSettings || DEFAULT_SLA_SETTINGS;
+  const slaEvaluation = evaluateTicketSLA(ticket as any, slaSettings);
+
   const [messages, auditEvents] = await Promise.all([
     Message.find({ ticketId: ticket._id, workspaceId }).sort({ createdAt: 1 }),
     AuditEvent.find({ ticketId: ticket._id, workspaceId }).sort({ createdAt: -1 }),
   ]);
 
-  return { ticket, messages, auditEvents };
+  return { ticket, messages, auditEvents, slaEvaluation };
 };
 
 export const updateTicketStatus = async (
@@ -329,7 +428,11 @@ export const updateTicketStatus = async (
     throw new BadRequestError('Invalid ticket identifier');
   }
 
-  const ticket = await Ticket.findOne({ _id: ticketId, workspaceId });
+  const [ticket, workspace] = await Promise.all([
+    Ticket.findOne({ _id: ticketId, workspaceId }),
+    Workspace.findById(workspaceId),
+  ]);
+
   if (!ticket) {
     throw new NotFoundError('Ticket not found in this workspace');
   }
@@ -344,14 +447,83 @@ export const updateTicketStatus = async (
 
   const previousStatus = ticket.status;
   ticket.status = newStatus;
+  const now = new Date();
+  const slaSettings = workspace?.settings?.slaSettings || DEFAULT_SLA_SETTINGS;
+
+  if (!ticket.sla) {
+    ticket.sla = {
+      isFirstResponseBreached: false,
+      isResolutionBreached: false,
+      isWarningSent: false,
+      isEscalated: false,
+      totalPausedMinutes: 0,
+      pauseHistory: [],
+    };
+  }
+
+  // PAUSE SLA CLOCK: When status becomes 'pending'
+  if (newStatus === 'pending') {
+    if (!ticket.sla.pausedAt) {
+      ticket.sla.pausedAt = now;
+      ticket.sla.pauseHistory.push({
+        pausedAt: now,
+        reason: 'Waiting on customer reply',
+      });
+    }
+  }
+
+  // RESUME SLA CLOCK: When status leaves 'pending' back to active work
+  if (previousStatus === 'pending' && (newStatus === 'open' || newStatus === 'in_progress')) {
+    if (ticket.sla.pausedAt) {
+      const pausedMinutes = calculateBusinessMinutesElapsed(
+        ticket.sla.pausedAt,
+        now,
+        slaSettings.businessHours
+      );
+
+      // Adjust remaining deadlines forward by paused business minutes
+      if (ticket.sla.firstResponseDeadline) {
+        ticket.sla.firstResponseDeadline = new Date(
+          ticket.sla.firstResponseDeadline.getTime() + pausedMinutes * 60000
+        );
+      }
+      if (ticket.sla.resolutionDeadline) {
+        ticket.sla.resolutionDeadline = new Date(
+          ticket.sla.resolutionDeadline.getTime() + pausedMinutes * 60000
+        );
+      }
+
+      ticket.sla.totalPausedMinutes = (ticket.sla.totalPausedMinutes || 0) + pausedMinutes;
+
+      if (ticket.sla.pauseHistory.length > 0) {
+        const lastEntry = ticket.sla.pauseHistory[ticket.sla.pauseHistory.length - 1];
+        if (!lastEntry.resumedAt) {
+          lastEntry.resumedAt = now;
+          lastEntry.pausedBusinessMinutes = pausedMinutes;
+        }
+      }
+
+      ticket.sla.pausedAt = undefined;
+    }
+  }
 
   if (newStatus === 'resolved') {
-    ticket.resolvedAt = new Date();
+    ticket.resolvedAt = now;
+    ticket.sla.resolutionAchievedAt = now;
+    if (ticket.sla.resolutionDeadline && now > ticket.sla.resolutionDeadline) {
+      ticket.sla.isResolutionBreached = true;
+    }
   } else if (newStatus === 'closed') {
-    ticket.closedAt = new Date();
+    ticket.closedAt = now;
+    if (!ticket.sla.resolutionAchievedAt) {
+      ticket.sla.resolutionAchievedAt = now;
+    }
+    if (ticket.sla.resolutionDeadline && now > ticket.sla.resolutionDeadline) {
+      ticket.sla.isResolutionBreached = true;
+    }
   } else if (newStatus === 'open' || newStatus === 'in_progress') {
-    // If reopened, clear closure timestamp
     ticket.closedAt = undefined;
+    ticket.sla.resolutionAchievedAt = undefined;
   }
 
   await ticket.save();
@@ -368,6 +540,36 @@ export const updateTicketStatus = async (
     details: { from: previousStatus, to: newStatus },
   });
 
+  // Real-time broadcast
+  emitToWorkspace(workspaceId, 'ticket:status_changed', {
+    ticketId: ticket._id,
+    ticketNumber: ticket.ticketNumber,
+    from: previousStatus,
+    to: newStatus,
+  });
+  emitToTicket(ticket._id, 'ticket:status_changed', {
+    ticketId: ticket._id,
+    ticketNumber: ticket.ticketNumber,
+    from: previousStatus,
+    to: newStatus,
+  });
+
+  // In-app notification to assignee if someone else modified status
+  if (ticket.assignedTo && ticket.assignedTo.toString() !== actor.userId.toString()) {
+    await queueNotificationJob({
+      workspaceId: workspaceId.toString(),
+      userId: ticket.assignedTo.toString(),
+      type: 'status_changed',
+      title: `Status Changed: ${ticket.ticketNumber}`,
+      message: `${actor.name} changed status of ${ticket.ticketNumber} from ${previousStatus} to ${newStatus}.`,
+      ticketId: ticket._id.toString(),
+      ticketNumber: ticket.ticketNumber,
+    });
+  }
+
+  // Enqueue SLA check
+  await queueSlaCheckJob(ticket._id.toString());
+
   return ticket;
 };
 
@@ -381,13 +583,42 @@ export const updateTicketPriority = async (
     throw new BadRequestError('Invalid ticket identifier');
   }
 
-  const ticket = await Ticket.findOne({ _id: ticketId, workspaceId });
+  const [ticket, workspace] = await Promise.all([
+    Ticket.findOne({ _id: ticketId, workspaceId }),
+    Workspace.findById(workspaceId),
+  ]);
+
   if (!ticket) {
     throw new NotFoundError('Ticket not found in this workspace');
   }
 
   const previousPriority = ticket.priority;
   ticket.priority = newPriority;
+
+  // Recompute SLA deadlines based on new priority targets
+  const slaSettings = workspace?.settings?.slaSettings || DEFAULT_SLA_SETTINGS;
+  const { firstResponseDeadline, resolutionDeadline } = calculateInitialSLADeadlines(
+    ticket.createdAt,
+    newPriority as any,
+    slaSettings
+  );
+
+  if (!ticket.sla) {
+    ticket.sla = {
+      isFirstResponseBreached: false,
+      isResolutionBreached: false,
+      isWarningSent: false,
+      isEscalated: false,
+      totalPausedMinutes: 0,
+      pauseHistory: [],
+    };
+  }
+
+  // Shift by existing paused minutes
+  const totalPaused = ticket.sla.totalPausedMinutes || 0;
+  ticket.sla.firstResponseDeadline = new Date(firstResponseDeadline.getTime() + totalPaused * 60000);
+  ticket.sla.resolutionDeadline = new Date(resolutionDeadline.getTime() + totalPaused * 60000);
+
   await ticket.save();
 
   await AuditEvent.create({
@@ -401,6 +632,19 @@ export const updateTicketPriority = async (
     action: 'priority_changed',
     details: { from: previousPriority, to: newPriority },
   });
+
+  emitToWorkspace(workspaceId, 'ticket:priority_changed', {
+    ticketId: ticket._id,
+    ticketNumber: ticket.ticketNumber,
+    priority: newPriority,
+  });
+  emitToTicket(ticket._id, 'ticket:priority_changed', {
+    ticketId: ticket._id,
+    priority: newPriority,
+  });
+
+  // Enqueue SLA re-evaluation
+  await queueSlaCheckJob(ticket._id.toString());
 
   return ticket;
 };
@@ -420,6 +664,7 @@ export const assignTicket = async (
     throw new NotFoundError('Ticket not found in this workspace');
   }
 
+  const previousAssignee = ticket.assignedTo;
   let assignedUserName = 'Unassigned';
 
   if (assignedToUserId) {
@@ -460,6 +705,35 @@ export const assignTicket = async (
     },
   });
 
+  // Real-time broadcast
+  emitToWorkspace(workspaceId, 'ticket:assigned', {
+    ticketId: ticket._id,
+    ticketNumber: ticket.ticketNumber,
+    assignedTo: ticket.assignedTo,
+    assignedUserName,
+  });
+  emitToTicket(ticket._id, 'ticket:assigned', {
+    ticketId: ticket._id,
+    ticketNumber: ticket.ticketNumber,
+    assignedTo: ticket.assignedTo,
+    assignedUserName,
+  });
+
+  // Enqueue Notification for the new assignee
+  if (assignedToUserId && assignedToUserId !== actor.userId.toString()) {
+    const isReassignment = !!previousAssignee && previousAssignee.toString() !== assignedToUserId;
+    await queueNotificationJob({
+      workspaceId: workspaceId.toString(),
+      userId: assignedToUserId,
+      type: isReassignment ? 'ticket_reassigned' : 'ticket_assigned',
+      title: isReassignment ? `Ticket Reassigned: ${ticket.ticketNumber}` : `New Ticket Assigned: ${ticket.ticketNumber}`,
+      message: `${actor.name} assigned ticket ${ticket.ticketNumber} ("${ticket.subject}") to you.`,
+      ticketId: ticket._id.toString(),
+      ticketNumber: ticket.ticketNumber,
+      sendEmail: true,
+    });
+  }
+
   return ticket;
 };
 
@@ -496,9 +770,25 @@ export const addStaffMessage = async (
     content: content.trim(),
   });
 
-  // If this is the first public reply from staff, record firstResponseAt
+  const now = new Date();
+
+  // If this is the first public reply from staff, record firstResponseAt and evaluate breach
   if (type === 'reply' && !ticket.firstResponseAt) {
-    ticket.firstResponseAt = new Date();
+    ticket.firstResponseAt = now;
+    if (!ticket.sla) {
+      ticket.sla = {
+        isFirstResponseBreached: false,
+        isResolutionBreached: false,
+        isWarningSent: false,
+        isEscalated: false,
+        totalPausedMinutes: 0,
+        pauseHistory: [],
+      };
+    }
+    ticket.sla.firstResponseAchievedAt = now;
+    if (ticket.sla.firstResponseDeadline && now > ticket.sla.firstResponseDeadline) {
+      ticket.sla.isFirstResponseBreached = true;
+    }
     await ticket.save();
   }
 
@@ -513,6 +803,32 @@ export const addStaffMessage = async (
     action: type === 'reply' ? 'staff_reply_added' : 'internal_note_added',
     details: { messageId: message._id },
   });
+
+  // Real-time broadcast
+  emitToWorkspace(workspaceId, 'ticket:reply', {
+    ticketId: ticket._id,
+    ticketNumber: ticket.ticketNumber,
+    messageId: message._id,
+    type,
+    sender: message.sender,
+  });
+  emitToTicket(ticket._id, 'ticket:reply', {
+    ticketId: ticket._id,
+    message,
+  });
+
+  // Notify assignee if another staff member left a reply or note
+  if (ticket.assignedTo && ticket.assignedTo.toString() !== actor.userId.toString()) {
+    await queueNotificationJob({
+      workspaceId: workspaceId.toString(),
+      userId: ticket.assignedTo.toString(),
+      type: 'ticket_reply',
+      title: `New ${type === 'note' ? 'Internal Note' : 'Reply'} on ${ticket.ticketNumber}`,
+      message: `${actor.name} added a ${type === 'note' ? 'private note' : 'reply'} to ${ticket.ticketNumber}.`,
+      ticketId: ticket._id.toString(),
+      ticketNumber: ticket.ticketNumber,
+    });
+  }
 
   return message;
 };

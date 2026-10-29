@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, loginApi, logoutApi, getMeApi } from '../api/client';
+import { updateSocketAuth } from '../realtime/socket';
 
 interface AuthContextType {
   user: User | null;
@@ -24,15 +25,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const initAuth = async () => {
       try {
         if (token) {
+          updateSocketAuth(token);
           const { user: fetchedUser, workspace: fetchedWorkspace } = await getMeApi();
           setUser(fetchedUser);
           setWorkspace(fetchedWorkspace);
+        } else {
+          updateSocketAuth(null);
         }
       } catch (err) {
         console.warn('Session expired or invalid token');
         localStorage.removeItem('supportflow_token');
         setToken(null);
         setUser(null);
+        updateSocketAuth(null);
       } finally {
         setIsLoading(false);
       }
@@ -46,6 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('supportflow_token', res.token);
     setToken(res.token);
     setUser(res.user);
+    updateSocketAuth(res.token);
     return res.user;
   };
 
@@ -59,6 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(null);
     setUser(null);
     setWorkspace(null);
+    updateSocketAuth(null);
   };
 
   return (

@@ -29,6 +29,7 @@ import { ReassignDropdown } from '../components/ReassignDropdown';
 import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
+import { DashboardLayout } from '../components/DashboardLayout';
 import {
   Users,
   AlertCircle,
@@ -304,25 +305,51 @@ export const TeamLeadDashboardPage: React.FC = () => {
     </tr>
   );
 
-  return (
-    <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-extrabold text-white tracking-tight">
-              Team Lead Portal
-            </h1>
-            <span className="px-2 py-0.5 text-[11px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-md">
-              Operations Supervisor
-            </span>
-          </div>
-          <p className="text-slate-400 text-xs sm:text-sm mt-1">
-            Supervise team workload, unblock frontline agents, and report incident escalations to Workspace Administration.
-          </p>
-        </div>
+  const sidebarItems = [
+    {
+      id: 'workload',
+      label: 'Workload & Queue Triage',
+      icon: <Users className="w-4 h-4 text-indigo-400" />,
+      badge: { text: totalActive },
+    },
+    {
+      id: 'queries',
+      label: 'Agent Inquiries & Guidance',
+      icon: <MessageSquareShare className="w-4 h-4 text-brand-400" />,
+      badge:
+        (queriesResult?.summary?.open || 0) > 0
+          ? { text: `${queriesResult?.summary?.open} Open`, variant: 'warning' as const }
+          : undefined,
+    },
+    {
+      id: 'admin_reports',
+      label: 'Admin Reports & Escalations',
+      icon: <ClipboardList className="w-4 h-4 text-purple-400" />,
+      badge:
+        (adminReportsResult?.summary?.critical || 0) > 0
+          ? { text: `${adminReportsResult?.summary?.critical} Critical`, variant: 'danger' as const }
+          : undefined,
+    },
+  ];
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+  return (
+    <DashboardLayout
+      portalTitle="Team Lead Portal"
+      roleBadgeText="Operations Supervisor"
+      roleBadgeVariant="lead"
+      accentColor="indigo"
+      headerTitle="Team Lead Portal"
+      headerSubtitle="Supervise team workload, unblock frontline agents, and report incident escalations to Workspace Administration."
+      items={sidebarItems}
+      activeItemId={activeSection}
+      onSelectItemId={(id) => handleSectionChange(id as any)}
+      sidebarFooterAction={{
+        label: 'Submit Report to Admin',
+        icon: <Plus className="w-4 h-4" />,
+        onClick: () => setShowNewReportModal(true),
+      }}
+      headerActions={
+        <>
           <button
             onClick={() => setShowNewReportModal(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium shadow-sm transition"
@@ -338,57 +365,9 @@ export const TeamLeadDashboardPage: React.FC = () => {
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Refresh</span>
           </button>
-        </div>
-      </div>
-
-      {/* Main Section Navigation Tabs */}
-      <div className="flex border-b border-slate-800 mb-8 gap-2 sm:gap-4 overflow-x-auto">
-        <button
-          onClick={() => handleSectionChange('workload')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            activeSection === 'workload'
-              ? 'border-indigo-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Users className="w-4 h-4 text-indigo-400" />
-          <span>Workload & Queue Triage</span>
-        </button>
-
-        <button
-          onClick={() => handleSectionChange('queries')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            activeSection === 'queries'
-              ? 'border-indigo-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <MessageSquareShare className="w-4 h-4 text-brand-400" />
-          <span>Agent Inquiries & Guidance</span>
-          {queriesResult?.summary && queriesResult.summary.open + queriesResult.summary.inReview > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-brand-500/20 text-brand-300 font-bold">
-              {queriesResult.summary.open} Open
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => handleSectionChange('admin_reports')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            activeSection === 'admin_reports'
-              ? 'border-purple-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <ClipboardList className="w-4 h-4 text-purple-400" />
-          <span>Admin Reports & Escalations</span>
-          {adminReportsResult?.summary && adminReportsResult.summary.critical > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/20 text-rose-300 font-bold">
-              {adminReportsResult.summary.critical} Critical
-            </span>
-          )}
-        </button>
-      </div>
+        </>
+      }
+    >
 
       {/* ===================================================================== */}
       {/* SECTION 1: WORKLOAD & QUEUE TRIAGE */}
@@ -1410,6 +1389,6 @@ export const TeamLeadDashboardPage: React.FC = () => {
           </div>
         </div>
       )}
-    </main>
+    </DashboardLayout>
   );
 };

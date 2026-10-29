@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
+import { ITicketSLA } from '../sla/sla.types';
 
 export type TicketStatus = 'open' | 'in_progress' | 'pending' | 'resolved' | 'closed';
 export type TicketPriority = 'P1' | 'P2' | 'P3' | 'P4';
@@ -22,6 +23,7 @@ export interface ITicket extends Document {
   firstResponseAt?: Date;
   resolvedAt?: Date;
   closedAt?: Date;
+  sla?: ITicketSLA;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -104,6 +106,26 @@ const TicketSchema = new Schema<ITicket>(
     closedAt: {
       type: Date,
     },
+    sla: {
+      firstResponseDeadline: { type: Date },
+      resolutionDeadline: { type: Date },
+      firstResponseAchievedAt: { type: Date },
+      resolutionAchievedAt: { type: Date },
+      isFirstResponseBreached: { type: Boolean, default: false },
+      isResolutionBreached: { type: Boolean, default: false },
+      isWarningSent: { type: Boolean, default: false },
+      isEscalated: { type: Boolean, default: false },
+      pausedAt: { type: Date },
+      totalPausedMinutes: { type: Number, default: 0 },
+      pauseHistory: [
+        {
+          pausedAt: { type: Date, required: true },
+          resumedAt: { type: Date },
+          reason: { type: String },
+          pausedBusinessMinutes: { type: Number, default: 0 },
+        },
+      ],
+    },
   },
   {
     timestamps: true,
@@ -116,5 +138,9 @@ TicketSchema.index({ workspaceId: 1, status: 1 });
 TicketSchema.index({ workspaceId: 1, priority: 1 });
 TicketSchema.index({ workspaceId: 1, assignedTo: 1 });
 TicketSchema.index({ workspaceId: 1, createdAt: -1 });
+TicketSchema.index({ workspaceId: 1, 'sla.firstResponseDeadline': 1 });
+TicketSchema.index({ workspaceId: 1, 'sla.resolutionDeadline': 1 });
+TicketSchema.index({ workspaceId: 1, 'sla.isFirstResponseBreached': 1 });
+TicketSchema.index({ workspaceId: 1, 'sla.isResolutionBreached': 1 });
 
 export const Ticket = mongoose.model<ITicket>('Ticket', TicketSchema);

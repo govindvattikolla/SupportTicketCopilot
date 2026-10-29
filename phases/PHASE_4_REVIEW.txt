@@ -1,0 +1,261 @@
+================================================================================
+SUPPORTFLOW - PHASE 4 IMPLEMENTATION REVIEW & ARCHITECTURE SPECIFICATION
+================================================================================
+Generated: 2026-10-28
+Author: SupportFlow Engineering Team
+Phase: Phase 4 - Configurable SLA Policies, Business Hours, Redis & BullMQ Workers, Notifications & Real-Time Socket.IO
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Phase 4 elevates SupportFlow to an enterprise-grade operational service level agreement (SLA)
+and real-time notification engine. It incorporates:
+1. Configurable SLA Policies & Targets:
+   - Separate First Response and Resolution target durations configured per priority (P1–P4).
+   - Configurable approaching SLA warning threshold (e.g. 80% elapsed).
+2. Business-Hours Calendar Engine:
+   - Accurate calculation accounting for workspace timezone, operating start/end hours,
+     working days of the week (e.g. Mon–Fri), and observed holidays.
+   - Dual mode: Business Hours calculation mode or 24/7 continuous calendar clock.
+3. SLA Clock State Machine:
+   - Starts automatically on ticket creation.
+   - Pauses when ticket status enters 'pending' (waiting on customer response).
+   - Resumes when customer replies or status transitions back to 'open' / 'in_progress',
+     extending deadlines by exactly the elapsed paused business duration.
+   - Stops first response clock on the first public staff reply.
+   - Stops resolution clock when status becomes 'resolved' or 'closed'.
+4. Background Asynchronous Workers (Redis & BullMQ):
+   - Offloads long-running and periodic tasks outside of HTTP request handlers.
+   - SLA Queue (`slaQueue`): Periodically scans active tickets, identifies warnings and breaches,
+     and triggers automatic escalation and notifications.
+   - Notification Queue (`notificationQueue`): Dispatches in-app notifications and email alerts
+     with exponential backoff retries, deduplication keys, and safe failure handling.
+   - Dedicated worker entrypoint: `npm run worker` (`backend/src/workers/index.ts`).
+5. In-App Notifications & Notification Center:
+   - Notification records stored in MongoDB (single source of truth).
+   - Bell icon in navbar with live unread badge, popover dropdown, mark as read, and bulk mark read.
+   - Real-time updates delivered instantly via Socket.IO.
+6. Real-Time Socket.IO Updates & Strict Authorization:
+   - Strict tenant isolation: prevents cross-tenant eavesdropping.
+   - Socket connections require valid JWT authentication.
+   - Room subscription (`join_ticket`) verifies ticket workspace ownership.
+   - Events emitted: `ticket:created`, `ticket:updated`, `message:new`, `notification:new`,
+     `notification:read`, `notification:read_all`.
+
+Verification Metrics:
+- 60/60 automated tests passing across 7 Vitest test suites (100% green).
+- Clean TypeScript compilation with zero errors across backend and frontend.
+- Production build passes with `npm run build` in `frontend/`.
+
+--------------------------------------------------------------------------------
+2. WORKFLOW FROM FRONTEND TO EXPRESS API TO SERVICE TO MONGODB AND BACK
+--------------------------------------------------------------------------------
+
+A. TICKET CREATION & INITIAL SLA CALCULATION:
+   1. Customer submits support form (`POST /api/public/tickets`) via frontend.
+   2. Express route routes to `publicTicket.controller.ts` -> `createPublicTicket`.
+   3. `ticket.service.ts` fetches the workspace SLA settings (priorities, operating hours, timezone).
+   4. `calculateInitialSLADeadlines()` runs the business-hours engine to project `firstResponseDeadline`
+      and `resolutionDeadline` skipping non-working hours, weekends, and holidays.
+   5. Ticket is inserted into MongoDB with `sla` subdocument and compound indexes.
+   6. AuditEvent is persisted in MongoDB.
+   7. Real-time broadcast: `emitToWorkspace(workspaceId, 'ticket:created', { ticket })` is pushed via Socket.IO.
+   8. BullMQ job `queueSlaCheckJob(ticketId)` is enqueued for asynchronous tracking.
+   9. Response returns HTTP 201 with ticket and secure tracking token to frontend.
+
+B. SLA CLOCK STATE MACHINE (PAUSE / RESUME / STOP):
+   1. Agent marks ticket as 'pending' (waiting for customer):
+      - `updateTicketStatus` records `sla.pausedAt = new Date()` and adds entry to `sla.pauseHistory`.
+      - Clocks pause. Socket.IO emits `ticket:updated`.
+   2. Customer sends reply via public tracker (`POST /api/public/tickets/:token/reply`):
+      - `addCustomerReply` detects paused state.
+      - Calculates paused business minutes between `pausedAt` and `now`.
+      - Deadlines (`firstResponseDeadline`, `resolutionDeadline`) are shifted forward by the exact paused duration.
+      - Total paused minutes are updated. Status transitions back to 'open'.
+      - Enqueues notification to assigned agent and emits Socket.IO updates.
+   3. Agent posts public customer reply:
+      - `addStaffMessage` sets `ticket.firstResponseAt` and `ticket.sla.firstResponseAchievedAt`.
+      - First response clock stops permanently.
+   4. Agent marks ticket 'resolved':
+      - Sets `ticket.resolvedAt` and `ticket.sla.resolutionAchievedAt`.
+      - Resolution clock stops permanently.
+
+C. PERIODIC SLA SCANNER & ESCALATION WORKER:
+   1. Worker runs periodic scan (`scanAndEvaluateActiveSLAs`).
+   2. Queries MongoDB for non-terminal tickets (`status: { $in: ['open', 'in_progress', 'pending'] }`).
+   3. Runs `evaluateTicketSLA()` using workspace business hours.
+   4. If `warning` threshold is crossed and `isWarningSent === false`:
+      - Updates `ticket.sla.isWarningSent = true`.
+      - Enqueues `dispatch-notification` to `notificationQueue` (type `sla_warning`).
+      - Emits Socket.IO update.
+   5. If deadline is breached and `isBreached === true`:
+      - Updates `isFirstResponseBreached = true` or `isResolutionBreached = true`.
+      - Automatically escalates ticket (`ticket.sla.isEscalated = true`).
+      - Enqueues escalation notification to assigned agent and Team Leads (type `sla_breached`).
+      - Emits Socket.IO update.
+
+D. IN-APP & EMAIL NOTIFICATIONS DISPATCH:
+   1. Event occurs (assignment, reassignment, reply, status change, SLA warning/breach).
+   2. `queueNotificationJob()` pushes job to BullMQ `notificationQueue`.
+   3. `notificationWorker` picks up job and invokes `createAndDispatchNotification()`.
+   4. In-app notification is inserted into MongoDB `notifications` collection.
+   5. Socket.IO pushes `notification:new` directly to recipient's private user room (`user:<userId>`).
+   6. Frontend `NotificationCenter` receives socket event, updates badge count, and invalidates query cache.
+   7. Email dispatcher checks deduplication cache (`deduplicationKey`), sends email via nodemailer/mock,
+      and caches the key with a 24-hour TTL to prevent duplicate sends on retries.
+
+--------------------------------------------------------------------------------
+3. INVENTORY OF NEW AND MODIFIED FILES
+--------------------------------------------------------------------------------
+
+BACKEND:
+- `backend/src/shared/redis.ts` (NEW):
+  Redis client factory supporting production Redis (`REDIS_URL`) with graceful fallback to `ioredis-mock`
+  for zero-dependency local and test execution.
+- `backend/src/modules/sla/sla.types.ts` (NEW):
+  TypeScript contracts for SLA priority targets, business hours config, pause history, and evaluation results.
+- `backend/src/modules/sla/slaEngine.ts` (NEW):
+  Business-hours calculation engine: minutes math, holiday & weekend skipping, timezone support,
+  pause/resume delta calculations, and status evaluation (`healthy`, `warning`, `breached`, `paused`, `satisfied`).
+- `backend/src/modules/workspaces/workspace.model.ts` (MODIFIED):
+  Extended workspace schema with `settings.slaSettings` and default SLA policies.
+- `backend/src/modules/workspaces/workspace.controller.ts` & `workspace.routes.ts` (MODIFIED):
+  Added `GET /api/workspaces/current/sla` and `PATCH /api/workspaces/current/sla` guarded by Admin authorization.
+- `backend/src/modules/tickets/ticket.model.ts` (MODIFIED):
+  Added `sla` subdocument (deadlines, breach flags, pause history, pause minutes, escalation flag) and compound indexes.
+- `backend/src/modules/tickets/ticket.service.ts` (MODIFIED):
+  Integrated SLA deadline initialization, pause on pending, resume on customer reply/reopen,
+  first-response achievement, resolution achievement, real-time Socket.IO broadcasts, and notification queueing.
+- `backend/src/modules/notifications/notification.model.ts` (NEW):
+  Mongoose schema and indexes for in-app staff notifications (`ticket_assigned`, `ticket_reassigned`,
+  `ticket_reply`, `status_changed`, `sla_warning`, `sla_breached`).
+- `backend/src/modules/notifications/email.service.ts` (NEW):
+  Idempotent email dispatcher with deduplication keys, retry backoff, and safe error handling.
+- `backend/src/modules/notifications/notification.service.ts` (NEW):
+  Notification creation, pagination, unread counters, and mark-as-read mutations.
+- `backend/src/modules/notifications/notification.controller.ts` & `notification.routes.ts` (NEW):
+  HTTP API endpoints mounted at `/api/notifications` (`GET /`, `PATCH /:id/read`, `PATCH /read-all`).
+- `backend/src/jobs/queues.ts` (NEW):
+  BullMQ queue definitions (`slaQueue`, `notificationQueue`) with exponential backoff and deduplication.
+- `backend/src/workers/slaWorker.ts` & `notificationWorker.ts` & `index.ts` (NEW):
+  Dedicated worker processes and periodic SLA scanner; added `"worker": "tsx src/workers/index.ts"` to `package.json`.
+- `backend/src/realtime/socket.ts` (NEW):
+  Socket.IO server with JWT authentication, tenant isolation, and workspace-guarded ticket room subscription.
+- `backend/src/server.ts` (MODIFIED):
+  Initializes Socket.IO server and worker lifecycle alongside HTTP server.
+- `backend/src/app.ts` (MODIFIED):
+  Registered `/api/notifications` route.
+- `backend/src/scripts/seed.ts` (MODIFIED):
+  Seeds initial test notifications and synchronizes ticket SLAs.
+- `backend/tests/sla_engine.test.ts` (NEW, 8 tests):
+  Unit and integration tests for business-hour additions, overnight rollovers, weekends, holidays, 24/7 calendar mode.
+- `backend/tests/notifications_jobs.test.ts` (NEW, 4 tests):
+  Tests for notification dispatch, unread counters, mark-as-read, and email deduplication.
+- `backend/tests/socket_auth.test.ts` (NEW, 5 tests):
+  Tests for JWT socket authentication, rejection of invalid tokens, and cross-workspace ticket room join prevention.
+
+FRONTEND:
+- `frontend/src/api/client.ts` (MODIFIED):
+  Added `TicketSLA`, `SLAEvaluationResult`, `AppNotification`, `ISLASettings`, and API methods for notifications and SLA.
+- `frontend/src/realtime/socket.ts` (NEW):
+  Socket.IO client singleton connecting with stored JWT auth token and subscription helpers.
+- `frontend/src/context/AuthContext.tsx` (MODIFIED):
+  Synchronizes socket authentication state on login, logout, and token initialization.
+- `frontend/src/components/Badges.tsx` (MODIFIED):
+  Added `SLABadge` supporting `healthy`, `warning`, `breached`, `paused`, and `satisfied` states.
+- `frontend/src/components/NotificationCenter.tsx` (NEW):
+  Interactive bell notification center in Navbar with real-time socket events, unread count badge, and mark read controls.
+- `frontend/src/components/SLAConfigEditor.tsx` (NEW):
+  Interactive SLA & Business Hours editor for Admins: P1–P4 targets, business hours toggle, timezone, operating hours, working days, and holidays.
+- `frontend/src/components/Navbar.tsx` (MODIFIED):
+  Rendered `<NotificationCenter />` for authenticated staff members.
+- `frontend/src/pages/TicketDetailPage.tsx` (MODIFIED):
+  Added SLA Tracking Card (First Response and Resolution status, countdown, pause duration, escalation badge),
+  plus real-time Socket.IO room subscription to auto-refresh ticket changes live.
+- `frontend/src/pages/AdminDashboardPage.tsx` (MODIFIED):
+  Added dedicated "SLA Policies & Business Hours" tab and embedded editor in settings.
+- `frontend/src/pages/AgentDashboardPage.tsx` (MODIFIED):
+  Rendered `SLABadge` on ticket rows and added Socket.IO real-time query invalidation. Removed obsolete placeholder box.
+- `frontend/src/components/NotificationsPlaceholder.tsx` (DELETED):
+  Removed obsolete Phase 2 placeholder in favor of the live Notification Center.
+
+--------------------------------------------------------------------------------
+4. CODE CLEANLINESS, DEPENDENCY & SECURITY AUDIT
+--------------------------------------------------------------------------------
+1. Duplicated Code:
+   - SLA business minutes calculation is unified in `slaEngine.ts` and reused across ticket creation,
+     status updates, and periodic background workers.
+2. Dependencies:
+   - `bullmq` & `ioredis`: Required for background queues and workers.
+   - `socket.io` & `socket.io-client`: Required for real-time WebSocket communication.
+   - `ioredis-mock`: Gracefully handles test and local environments when Redis is not running locally.
+3. Placeholder Functionality:
+   - All Phase 2 notification placeholders (`NotificationsPlaceholder.tsx`) have been removed.
+   - The Notification Center is connected to live MongoDB models and real-time Socket.IO push.
+4. Security Gaps Prevented:
+   - Socket.IO Authentication Middleware: Rejects any connection lacking a valid JWT or referencing
+     an inactive/non-existent user.
+   - Tenant Room Isolation: Sockets only join their specific tenant workspace (`workspace:<id>`),
+     role (`role:<id>:<role>`), and user room (`user:<id>`).
+   - Guarded Ticket Room Subscriptions: When a socket emits `join_ticket`, the backend queries MongoDB
+     to ensure the ticket belongs to the user's workspace before allowing room join.
+   - Admin Guards: SLA policy modification endpoints (`PATCH /api/workspaces/current/sla`) are strictly
+     restricted to users with the 'admin' role.
+
+--------------------------------------------------------------------------------
+5. MANUAL SETUP & DEPLOYMENT INSTRUCTIONS
+--------------------------------------------------------------------------------
+
+A. LOCAL DEVELOPMENT:
+   1. Redis (Optional for local testing):
+      - If a local Redis service is running on `redis://localhost:6379`, the server connects to it automatically.
+      - If Redis is NOT installed or running, the built-in `ioredis-mock` fallback activates automatically,
+        allowing the entire application, API, and tests to run with zero setup.
+   2. Running the Background Worker Process:
+      - In a dedicated terminal:
+        `cd backend`
+        `npm run worker`
+      - The worker process connects to Redis and continuously processes the `slaQueue` and `notificationQueue`.
+   3. Running the Main HTTP & Socket Server:
+      - In another terminal:
+        `cd backend`
+        `npm run dev`
+   4. Running the Frontend:
+      - In another terminal:
+        `cd frontend`
+        `npm run dev`
+
+B. PRODUCTION DEPLOYMENT:
+   1. Environment Variables:
+      - `REDIS_URL`: `redis://:<password>@<redis-host>:<port>` (e.g. AWS ElastiCache, Redis Cloud, Upstash).
+      - `JWT_SECRET`: High-entropy 256-bit secret string.
+      - `CLIENT_URL`: Production URL of the frontend (e.g. `https://support.yourdomain.com`).
+   2. Process Architecture:
+      - Web Process: `node dist/server.js` (serves Express API and Socket.IO).
+      - Worker Process: `node dist/workers/index.js` (can be horizontally scaled across multiple containers/dynos).
+
+--------------------------------------------------------------------------------
+6. HANDS-ON VERIFICATION CHECKLIST FOR USER
+--------------------------------------------------------------------------------
+[ ] 1. Run Automated Test Suite:
+       In `backend/`, run `npm test`. Verify all 7 test files and 60 tests pass.
+[ ] 2. Verify Frontend Production Build:
+       In `frontend/`, run `npm run build`. Verify 0 TypeScript errors and successful bundle creation.
+[ ] 3. Log In as Admin & Configure SLA:
+       Navigate to `http://localhost:5173/login`. Log in as Admin (`admin@supportflow.local` / `AdminPass123!`).
+       Click "SLA Policies & Business Hours" in the Admin Dashboard.
+       Verify P1–P4 targets, business hours start/end, working days, and holidays can be updated and saved.
+[ ] 4. Test In-App Notification Center:
+       In the top navbar, observe the Bell icon.
+       Click it to view the notification list, unread filter, and "Mark all read" button.
+[ ] 5. Test SLA Tracking & Clock States on Ticket Details:
+       Navigate to any ticket (e.g., `http://localhost:5173/agent/tickets/<ticketId>`).
+       In the right sidebar, verify the "SLA Policy & Deadlines" card:
+       - Displays Overall SLA Badge (`On Track`, `Approaching SLA`, `SLA Breached`, or `SLA Met`).
+       - Displays First Response target date and status.
+       - Displays Resolution target date and status.
+       - Change status to "Pending": verify "SLA clock paused (awaiting customer reply)" indicator appears.
+       - Change status back to "Open": verify SLA clock resumes and pause duration is recorded.
+[ ] 6. Test Real-Time Updates Across Browser Tabs:
+       Open two browser windows side by side (e.g., Admin in Window A and Agent in Window B).
+       Post an update or reply in Window A; observe Window B immediately updates via Socket.IO without manual refresh.

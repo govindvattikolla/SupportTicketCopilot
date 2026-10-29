@@ -23,11 +23,13 @@ import {
   QueryStatusBadge,
   UrgencyBadge,
   RoleBadge,
+  SLABadge,
 } from '../components/Badges';
 import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
-import { NotificationsPlaceholder } from '../components/NotificationsPlaceholder';
+import { DashboardLayout } from '../components/DashboardLayout';
+import { getSocket } from '../realtime/socket';
 import {
   Inbox,
   Clock,
@@ -66,6 +68,24 @@ export const AgentDashboardPage: React.FC = () => {
       setActiveTab('queries');
     }
   }, [tabParam]);
+
+  // Real-time Socket.IO synchronization for ticket changes
+  useEffect(() => {
+    const socket = getSocket();
+    const handleTicketChange = () => {
+      queryClient.invalidateQueries({ queryKey: ['agentSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['staffTickets'] });
+      queryClient.invalidateQueries({ queryKey: ['agentQueries'] });
+    };
+
+    socket.on('ticket:created', handleTicketChange);
+    socket.on('ticket:updated', handleTicketChange);
+
+    return () => {
+      socket.off('ticket:created', handleTicketChange);
+      socket.off('ticket:updated', handleTicketChange);
+    };
+  }, [queryClient]);
 
   const handleTabChange = (tab: 'my_work' | 'urgent' | 'inbox' | 'queries') => {
     setActiveTab(tab);
@@ -288,7 +308,24 @@ export const AgentDashboardPage: React.FC = () => {
         <StatusBadge status={ticket.status} />
       </td>
       <td className="py-3 px-4">
-        <PriorityBadge priority={ticket.priority} />
+        <div className="flex flex-col gap-1 items-start">
+          <PriorityBadge priority={ticket.priority} />
+          {ticket.sla && (
+            <SLABadge
+              status={
+                ticket.sla.isResolutionBreached || ticket.sla.isFirstResponseBreached
+                  ? 'breached'
+                  : ticket.status === 'pending'
+                  ? 'paused'
+                  : ticket.status === 'resolved' || ticket.status === 'closed'
+                  ? 'satisfied'
+                  : ticket.sla.isWarningSent
+                  ? 'warning'
+                  : 'healthy'
+              }
+            />
+          )}
+        </div>
       </td>
       <td className="py-3 px-4 hidden md:table-cell">
         <CategoryBadge category={ticket.category} />
@@ -310,23 +347,62 @@ export const AgentDashboardPage: React.FC = () => {
     </tr>
   );
 
-  return (
-    <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-extrabold text-white tracking-tight">Agent Workspace</h1>
-            <span className="px-2 py-0.5 text-[11px] font-semibold bg-brand-500/10 text-brand-400 border border-brand-500/20 rounded-md">
-              Level 1 Support
-            </span>
-          </div>
-          <p className="text-slate-400 text-xs sm:text-sm mt-1">
-            Manage your assigned queues, handle high-priority tickets, and collaborate with your Team Lead.
-          </p>
-        </div>
+  const sidebarItems = [
+    {
+      id: 'my_work',
+      label: 'My Active Tickets',
+      icon: <Inbox className="w-4 h-4" />,
+      badge: myWorkResult?.tickets?.length ? { text: myWorkResult.tickets.length } : undefined,
+    },
+    {
+      id: 'urgent',
+      label: 'High-Priority & Overdue',
+      icon: <AlertTriangle className="w-4 h-4 text-rose-400" />,
+      badge:
+        (summary?.highPriorityTickets?.length || 0) + (summary?.overdueTickets?.length || 0) > 0
+          ? {
+              text: (summary?.highPriorityTickets?.length || 0) + (summary?.overdueTickets?.length || 0),
+              variant: 'danger' as const,
+            }
+          : undefined,
+    },
+    {
+      id: 'queries',
+      label: 'Team Lead Consultations',
+      icon: <MessageSquareShare className="w-4 h-4 text-indigo-400" />,
+      badge:
+        (queriesResult?.summary?.open || 0) + (queriesResult?.summary?.inReview || 0) > 0
+          ? {
+              text: (queriesResult?.summary?.open || 0) + (queriesResult?.summary?.inReview || 0),
+              variant: 'info' as const,
+            }
+          : undefined,
+    },
+    {
+      id: 'inbox',
+      label: 'Full Ticket Inbox',
+      icon: <Filter className="w-4 h-4 text-slate-400" />,
+    },
+  ];
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+  return (
+    <DashboardLayout
+      portalTitle="Agent Workspace"
+      roleBadgeText="Level 1 Support"
+      roleBadgeVariant="agent"
+      accentColor="brand"
+      headerTitle="Agent Workspace"
+      headerSubtitle="Manage your assigned queues, handle high-priority tickets, and collaborate with your Team Lead."
+      items={sidebarItems}
+      activeItemId={activeTab}
+      onSelectItemId={(id) => handleTabChange(id as any)}
+      sidebarFooterAction={{
+        label: 'Consult Team Lead',
+        icon: <Plus className="w-4 h-4" />,
+        onClick: () => setShowNewQueryModal(true),
+      }}
+      headerActions={
+        <>
           <button
             onClick={() => setShowNewQueryModal(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium shadow-sm transition"
@@ -342,12 +418,9 @@ export const AgentDashboardPage: React.FC = () => {
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Refresh</span>
           </button>
-        </div>
-      </div>
-
-      {/* Notifications Placeholder Area */}
-      <NotificationsPlaceholder />
-
+        </>
+      }
+    >
       {/* Real Statistics Metric Cards */}
       {summaryError ? (
         <ErrorState
@@ -356,7 +429,7 @@ export const AgentDashboardPage: React.FC = () => {
           onRetry={refetchSummary}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <StatCard
             title="My Open Tickets"
             value={summary?.myOpenCount ?? 0}
@@ -405,72 +478,6 @@ export const AgentDashboardPage: React.FC = () => {
           />
         </div>
       )}
-
-      {/* Tab Navigation */}
-      <div className="flex border-b border-slate-800 mb-6 gap-2 sm:gap-4 overflow-x-auto">
-        <button
-          onClick={() => handleTabChange('my_work')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            activeTab === 'my_work'
-              ? 'border-brand-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Inbox className="w-4 h-4" />
-          <span>My Active Tickets</span>
-          {myWorkResult?.tickets && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300">
-              {myWorkResult.tickets.length}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => handleTabChange('urgent')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            activeTab === 'urgent'
-              ? 'border-brand-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <AlertTriangle className="w-4 h-4 text-rose-400" />
-          <span>High-Priority & Overdue</span>
-          {((summary?.highPriorityTickets?.length || 0) + (summary?.overdueTickets?.length || 0)) > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/20 text-rose-300 font-bold">
-              {(summary?.highPriorityTickets?.length || 0) + (summary?.overdueTickets?.length || 0)}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => handleTabChange('queries')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            activeTab === 'queries'
-              ? 'border-indigo-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <MessageSquareShare className="w-4 h-4 text-indigo-400" />
-          <span>Team Lead Consultations</span>
-          {queriesResult?.summary && queriesResult.summary.open + queriesResult.summary.inReview > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-500/20 text-indigo-300 font-bold">
-              {queriesResult.summary.open + queriesResult.summary.inReview}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => handleTabChange('inbox')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            activeTab === 'inbox'
-              ? 'border-brand-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Filter className="w-4 h-4" />
-          <span>Full Ticket Inbox</span>
-        </button>
-      </div>
 
       {/* Tab 1: My Active Queue */}
       {activeTab === 'my_work' && (
@@ -1237,6 +1244,6 @@ export const AgentDashboardPage: React.FC = () => {
           </div>
         </div>
       )}
-    </main>
+    </DashboardLayout>
   );
 };

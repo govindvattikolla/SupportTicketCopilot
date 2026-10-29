@@ -2,10 +2,15 @@ import http from 'http';
 import { createApp } from './app';
 import { connectDatabase, closeDatabase, getDatabaseStatus } from './config/db';
 import { env } from './config/env';
+import { initSocketServer } from './realtime/socket';
+import { startWorkers, stopWorkers } from './workers';
 
 const startServer = async (): Promise<void> => {
   const app = createApp();
   const server = http.createServer(app);
+
+  // Initialize Socket.IO with WebSocket and Polling transports
+  initSocketServer(server);
 
   // Attempt database connection
   try {
@@ -15,6 +20,13 @@ const startServer = async (): Promise<void> => {
   }
   console.log(`[Server] Database connection status: ${getDatabaseStatus()}`);
 
+  // Start background workers (SLA evaluation & notifications)
+  try {
+    await startWorkers();
+  } catch (err: any) {
+    console.warn('[Server] Worker startup warning:', err.message);
+  }
+
   server.listen(env.PORT, () => {
     console.log(`
 🚀 SupportFlow Backend API is running!
@@ -23,6 +35,8 @@ const startServer = async (): Promise<void> => {
 📡 Port:        ${env.PORT}
 🔗 URL:         http://localhost:${env.PORT}
 🩺 Health:      http://localhost:${env.PORT}/api/health
+⚡ Real-Time:   Socket.IO initialized
+⚙️  Workers:     SLA & Notifications active
 ---------------------------------------------
     `);
   });
@@ -33,6 +47,7 @@ const startServer = async (): Promise<void> => {
     server.close(async () => {
       console.log('[Server] HTTP server closed.');
       try {
+        await stopWorkers();
         await closeDatabase();
         console.log('[Server] Database connections closed.');
         process.exit(0);

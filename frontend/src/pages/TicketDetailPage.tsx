@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
@@ -26,6 +26,7 @@ import {
   QueryStatusBadge,
   UrgencyBadge,
   RoleBadge,
+  SLABadge,
 } from '../components/Badges';
 import {
   ArrowLeft,
@@ -40,7 +41,12 @@ import {
   Plus,
   X,
   CheckCircle,
+  Timer,
+  AlertOctagon,
+  PauseCircle,
+  Clock,
 } from 'lucide-react';
+import { subscribeToTicket, unsubscribeFromTicket, getSocket } from '../realtime/socket';
 
 export const TicketDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -95,6 +101,30 @@ export const TicketDetailPage: React.FC = () => {
     queryKey: ['workspaceAgents'],
     queryFn: getWorkspaceAgentsApi,
   });
+
+  // Real-time Socket.IO room subscription and updates
+  useEffect(() => {
+    if (!id) return;
+    subscribeToTicket(id);
+
+    const socket = getSocket();
+    const handleTicketUpdated = () => {
+      queryClient.invalidateQueries({ queryKey: ['ticketDetails', id] });
+      queryClient.invalidateQueries({ queryKey: ['ticketQueries', id] });
+    };
+    const handleNewMessage = () => {
+      queryClient.invalidateQueries({ queryKey: ['ticketDetails', id] });
+    };
+
+    socket.on('ticket:updated', handleTicketUpdated);
+    socket.on('message:new', handleNewMessage);
+
+    return () => {
+      unsubscribeFromTicket(id);
+      socket.off('ticket:updated', handleTicketUpdated);
+      socket.off('message:new', handleNewMessage);
+    };
+  }, [id, queryClient]);
 
   // Mutations
   const statusMutation = useMutation({
@@ -641,6 +671,112 @@ export const TicketDetailPage: React.FC = () => {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* SLA Tracking & Deadlines Card */}
+          <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Timer className="w-3.5 h-3.5 text-brand-400" />
+                <span>SLA Policy & Deadlines</span>
+              </h3>
+              {ticket.sla && (
+                <SLABadge
+                  status={
+                    ticket.sla.isResolutionBreached || ticket.sla.isFirstResponseBreached
+                      ? 'breached'
+                      : ticket.status === 'pending'
+                      ? 'paused'
+                      : ticket.status === 'resolved' || ticket.status === 'closed'
+                      ? 'satisfied'
+                      : ticket.sla.isWarningSent
+                      ? 'warning'
+                      : 'healthy'
+                  }
+                />
+              )}
+            </div>
+
+            {ticket.sla?.isEscalated && (
+              <div className="mb-3 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-2 text-rose-300 text-xs">
+                <AlertOctagon className="w-4 h-4 shrink-0 text-rose-400" />
+                <span className="font-semibold">Escalated due to SLA breach</span>
+              </div>
+            )}
+
+            {ticket.status === 'pending' && (
+              <div className="mb-3 p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center gap-2 text-purple-300 text-xs">
+                <PauseCircle className="w-4 h-4 shrink-0 text-purple-400" />
+                <span>SLA clock paused (awaiting customer reply)</span>
+              </div>
+            )}
+
+            <div className="space-y-3 text-xs">
+              {/* First Response SLA */}
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-medium text-slate-300">First Response</span>
+                  {ticket.sla?.firstResponseAchievedAt ? (
+                    <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3" /> Met
+                    </span>
+                  ) : ticket.sla?.isFirstResponseBreached ? (
+                    <span className="text-[11px] font-semibold text-rose-400 flex items-center gap-1">
+                      <AlertOctagon className="w-3 h-3" /> Breached
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-semibold text-amber-400 flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> Pending
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {ticket.sla?.firstResponseAchievedAt ? (
+                    <span>Achieved: {new Date(ticket.sla.firstResponseAchievedAt).toLocaleString()}</span>
+                  ) : ticket.sla?.firstResponseDeadline ? (
+                    <span>Target: {new Date(ticket.sla.firstResponseDeadline).toLocaleString()}</span>
+                  ) : (
+                    <span>No target set</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Resolution SLA */}
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-medium text-slate-300">Resolution</span>
+                  {ticket.sla?.resolutionAchievedAt ? (
+                    <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3" /> Met
+                    </span>
+                  ) : ticket.sla?.isResolutionBreached ? (
+                    <span className="text-[11px] font-semibold text-rose-400 flex items-center gap-1">
+                      <AlertOctagon className="w-3 h-3" /> Breached
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-semibold text-amber-400 flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> In Progress
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {ticket.sla?.resolutionAchievedAt ? (
+                    <span>Achieved: {new Date(ticket.sla.resolutionAchievedAt).toLocaleString()}</span>
+                  ) : ticket.sla?.resolutionDeadline ? (
+                    <span>Target: {new Date(ticket.sla.resolutionDeadline).toLocaleString()}</span>
+                  ) : (
+                    <span>No target set</span>
+                  )}
+                </div>
+              </div>
+
+              {Boolean(ticket.sla?.totalPausedMinutes) && (
+                <div className="flex justify-between py-1 text-slate-400 text-[11px]">
+                  <span>Total Paused Duration</span>
+                  <span className="text-slate-300 font-mono">{ticket.sla?.totalPausedMinutes} mins</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Ticket Information Summary */}

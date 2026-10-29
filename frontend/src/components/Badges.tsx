@@ -192,3 +192,51 @@ export const UrgencyBadge: React.FC<{ urgency: string }> = ({ urgency }) => {
   }
 };
 
+export const SLABadge: React.FC<{
+  status?: 'healthy' | 'warning' | 'breached' | 'paused' | 'satisfied';
+  label?: string;
+  isBreached?: boolean;
+}> = ({ status, label, isBreached }) => {
+  if (isBreached || status === 'breached') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+        <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span>
+        <span>{label || 'SLA Breached'}</span>
+      </span>
+    );
+  }
+
+  switch (status) {
+    case 'warning':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+          <span>{label || 'Approaching SLA'}</span>
+        </span>
+      );
+    case 'paused':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-500/15 text-purple-400 border border-purple-500/30">
+          <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+          <span>{label || 'SLA Paused'}</span>
+        </span>
+      );
+    case 'satisfied':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span>{label || 'SLA Met'}</span>
+        </span>
+      );
+    case 'healthy':
+    default:
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400/90 border border-emerald-500/20">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span>{label || 'On Track'}</span>
+        </span>
+      );
+  }
+};
+
+

@@ -2,151 +2,245 @@
 SUPPORTFLOW - PHASE 3 IMPLEMENTATION REVIEW & ARCHITECTURE SPECIFICATION
 ================================================================================
 Generated: 2026-10-27
+Last Updated: 2026-10-28 (Post-Review Role Hierarchy & Communication Enhancements)
 Author: SupportFlow Engineering Team
 Phase: Phase 3 - Role-Based Dashboards, Real Reporting, Workspace Management & RBAC Security
 
 --------------------------------------------------------------------------------
 1. EXECUTIVE SUMMARY
 --------------------------------------------------------------------------------
-Phase 3 establishes the operational management and reporting layer for SupportFlow with
-strict, dedicated role segregation across all three staff tiers:
+Phase 3 establishes the operational management, reporting, and inter-tier communication
+layer for SupportFlow with strict, dedicated role segregation across all four personas:
 
-1. Agent Dashboard (/agent/dashboard):
-   - Scope: Individual contributor queue and ticket triage.
+1. Public Customer (Unauthenticated / External):
+   - Scope: Self-service knowledge base, ticket submission, and status tracking.
+   - Access: Public (`/`, `/support`, `/track/:token`).
+   - Clean Separation: Customer-facing submission links (*Submit Ticket*, *Help Center*)
+     are strictly hidden from internal staff workflows to prevent operational clutter.
+
+2. Support Agent Dashboard (`/agent/dashboard`):
+   - Scope: Individual contributor queue, ticket triage, and supervisor consultations.
    - Access: Strictly reserved for users with role 'agent'.
-   - Capabilities: Personal open/in-progress tickets, urgent/overdue triage, filterable inbox with pagination, personal activity history, and notifications placeholder.
+   - Capabilities: Personal open/in-progress tickets, urgent/overdue triage, filterable
+     inbox with pagination, activity history, notifications preview, and a dedicated
+     "Team Lead Consultations" hub (`?tab=queries`) to seek guidance on specific tickets.
+     Direct "Consult Team Lead" action is also accessible inside ticket details (`/agent/tickets/:id`).
 
-2. Team Lead Portal (/lead/dashboard):
-   - Scope: Dedicated team leadership, queue triage, and workload distribution.
+3. Team Lead Portal (`/lead/dashboard`):
+   - Scope: Dedicated team leadership, queue triage, agent mentoring, and executive escalation.
    - Access: Strictly reserved for users with role 'lead'.
-   - Capabilities: Team workload analytics, live agent capacity comparison, unassigned & overdue ticket queues, instant reassignment controls, and domain reporting (status, priority, category). Team leads do not need an agent dashboard.
+   - Capabilities:
+     a) Team Workload Analytics: Agent capacity comparisons, unassigned & overdue queues,
+        and instant reassignment controls (`ReassignDropdown`).
+     b) Agent Inquiries & Guidance Console (`?tab=queries`): Review ticket queries opened by
+        agents, reply with technical/policy guidance, and resolve inquiries.
+     c) Admin Reports & Escalations Hub (`?tab=admin_reports`): Formally report systemic
+        bottlenecks, infrastructure outages, or staffing deficits directly to Workspace Admins.
 
-3. Workspace Administrator Portal (/admin/dashboard):
-   - Scope: Workspace governance, team member provisioning, global queue management, settings, and audit logs.
+4. Workspace Administrator Portal (`/admin/dashboard`):
+   - Scope: Workspace governance, team member provisioning, global queue management,
+     settings, immutable audit logs, and operational escalations.
    - Access: Strictly reserved for users with role 'admin'.
-   - Capabilities: Workspace overview, ticket counts by status and priority, complete staff roster management (add user, change role, toggle active status), global assignment/reassignment queue, workspace settings configuration, and paginated immutable audit ledger.
+   - Capabilities: Real-time workspace overview KPIs, complete staff roster management
+     (add user, change role, toggle active status), global reassignment queue, SLA/workspace
+     settings configuration, immutable audit ledger, and a dedicated "Team Lead Reports &
+     Escalations" console (`?tab=reports`) to review incident reports, issue binding executive
+     directives, and resolve operational escalations.
 
-All dashboard statistics, workload metrics, and audit logs are driven by real backend
-data computed via MongoDB queries and Express controllers (zero hardcoded mock stats).
+All dashboard statistics, workload metrics, consultation threads, operational reports, and
+audit logs are driven by real backend data computed via MongoDB queries and Express controllers.
 Strict backend RBAC authorization ensures that frontend visibility guards are always backed
 by HTTP 403 Forbidden enforcement on the API server.
 
-All Phase 3 requirements have been built and verified with:
-- 32/32 passing automated integration tests (Vitest).
+All Phase 3 requirements and post-review enhancements have been built and verified with:
+- 43/43 passing automated integration tests across 4 test suites (Vitest).
 - 100% clean TypeScript compilation (0 errors across backend and frontend).
-- Optimized production bundles built via Vite.
+- Production bundle verification via Vite (`npm run build` succeeds cleanly).
 
 --------------------------------------------------------------------------------
 2. ROLE SEGREGATION MATRIX
 --------------------------------------------------------------------------------
 
-| Capability / Resource                | Agent (`agent`) | Team Lead (`lead`) | Admin (`admin`) | Enforcement Mechanism |
-|--------------------------------------|:---------------:|:------------------:|:---------------:|-----------------------|
-| Agent Dashboard (`/agent/dashboard`) | ALLOWED (200)   | DENIED (403)       | DENIED (403)    | `RoleRoute` & `requireRole(['agent'])` |
-| Agent Summary API (`/api/reports/agent-summary`) | ALLOWED (200) | DENIED (403) | DENIED (403) | Express `requireRole(['agent'])` |
-| Team Lead Portal (`/lead/dashboard`) | DENIED (403)    | ALLOWED (200)      | DENIED (403)    | `RoleRoute` & `requireRole(['lead'])` |
-| Team Report API (`/api/reports/team`)| DENIED (403)    | ALLOWED (200)      | DENIED (403)    | Express `requireRole(['lead'])` |
-| Admin Portal (`/admin/dashboard`)    | DENIED (403)    | DENIED (403)       | ALLOWED (200)   | `RoleRoute` & `requireRole(['admin'])` |
-| Admin Overview API (`/api/reports/admin`)| DENIED (403)| DENIED (403)       | ALLOWED (200)   | Express `requireRole(['admin'])` |
-| Workspace Settings Mutation          | DENIED (403)    | DENIED (403)       | ALLOWED (200)   | Express `requireRole(['admin'])` |
-| User Provisioning & Role Management  | DENIED (403)    | DENIED (403)       | ALLOWED (200)   | Express `requireRole(['admin'])` |
-| Workspace Audit Ledger Access        | DENIED (403)    | DENIED (403)       | ALLOWED (200)   | Express `requireRole(['admin'])` |
-| Reassign Ticket (`PATCH /api/tickets/:id/assign`) | DENIED (403) | ALLOWED (200) | ALLOWED (200) | Express `requireRole(['admin', 'lead'])` |
-| View Ticket Detail Thread (`/agent/tickets/:id`) | ALLOWED | ALLOWED | ALLOWED | Staff Token & Multi-Tenant Workspace Guard |
+| Capability / Resource                            | Customer | Agent (`agent`) | Team Lead (`lead`) | Admin (`admin`) | Enforcement Mechanism |
+|--------------------------------------------------|:--------:|:---------------:|:------------------:|:---------------:|-----------------------|
+| Knowledge Base / Submit Ticket (`/`, `/support`) | ALLOWED  | HIDDEN IN NAV   | HIDDEN IN NAV      | HIDDEN IN NAV   | UI Role Sanitization & Public Route |
+| Agent Dashboard (`/agent/dashboard`)             | DENIED   | ALLOWED (200)   | DENIED (403)       | DENIED (403)    | `RoleRoute` & `requireRole(['agent'])` |
+| Agent Summary API (`/api/reports/agent-summary`) | DENIED   | ALLOWED (200)   | DENIED (403)       | DENIED (403)    | Express `requireRole(['agent'])` |
+| Agent <-> Lead Query Create (`POST /api/ticket-queries`) | DENIED | ALLOWED (201) | DENIED (403) | DENIED (403) | Express `requireRole(['agent'])` |
+| Agent <-> Lead Query List (`GET /api/ticket-queries`)   | DENIED | ALLOWED (Own)   | ALLOWED (All)      | ALLOWED (All)   | Express `requireRole(['agent','lead','admin'])` |
+| Lead Reply / Resolve Query (`PATCH /api/ticket-queries/:id/status`) | DENIED | DENIED (403) | ALLOWED (200) | ALLOWED (200) | Express `requireRole(['lead','admin'])` |
+| Team Lead Portal (`/lead/dashboard`)             | DENIED   | DENIED (403)    | ALLOWED (200)      | DENIED (403)    | `RoleRoute` & `requireRole(['lead'])` |
+| Team Report API (`/api/reports/team`)            | DENIED   | DENIED (403)    | ALLOWED (200)      | DENIED (403)    | Express `requireRole(['lead'])` |
+| Lead <-> Admin Report Create (`POST /api/admin-reports`) | DENIED | DENIED (403) | ALLOWED (201)   | DENIED (403)    | Express `requireRole(['lead'])` |
+| Lead <-> Admin Report List (`GET /api/admin-reports`)   | DENIED | DENIED (403)   | ALLOWED (200)     | ALLOWED (200)   | Express `requireRole(['lead','admin'])` |
+| Admin Directive & Status (`PATCH /api/admin-reports/:id/status`) | DENIED | DENIED (403) | DENIED (403) | ALLOWED (200) | Express `requireRole(['admin'])` |
+| Admin Portal (`/admin/dashboard`)                | DENIED   | DENIED (403)    | DENIED (403)       | ALLOWED (200)   | `RoleRoute` & `requireRole(['admin'])` |
+| Admin Overview API (`/api/reports/admin`)        | DENIED   | DENIED (403)    | DENIED (403)       | ALLOWED (200)   | Express `requireRole(['admin'])` |
+| Workspace Settings Mutation                      | DENIED   | DENIED (403)    | DENIED (403)       | ALLOWED (200)   | Express `requireRole(['admin'])` |
+| User Provisioning & Role Management              | DENIED   | DENIED (403)    | DENIED (403)       | ALLOWED (200)   | Express `requireRole(['admin'])` |
+| Workspace Audit Ledger Access                    | DENIED   | DENIED (403)    | DENIED (403)       | ALLOWED (200)   | Express `requireRole(['admin'])` |
+| Reassign Ticket (`PATCH /api/tickets/:id/assign`)| DENIED   | DENIED (403)    | ALLOWED (200)      | ALLOWED (200)   | Express `requireRole(['admin', 'lead'])` |
+| View Ticket Detail Thread (`/agent/tickets/:id`) | DENIED   | ALLOWED         | ALLOWED            | ALLOWED         | Staff Token & Workspace Guard |
 
 --------------------------------------------------------------------------------
 3. DATA FLOWS & ARCHITECTURE
 --------------------------------------------------------------------------------
 
-A. Agent Dashboard Flow:
+A. Agent Dashboard & Ticket Consultation Flow:
    1. Frontend (`/agent/dashboard`): Dispatches TanStack Query `['agentSummary']` to `GET /api/reports/agent-summary`.
    2. Express Auth Middleware: Authenticates JWT token and verifies `role === 'agent'`.
    3. Service Layer (`getAgentDashboardSummary`):
       - Calculates real-time counts for tickets assigned to `req.user._id` (`open`, `in_progress`, `highPriority`, `overdue`).
       - Identifies overdue items based on SLA thresholds (P1 > 4h, P2 > 24h, P3 > 48h, P4 > 72h).
       - Retrieves the agent's recent activity stream from `AuditEvent`.
-   4. UI View: Displays real StatCards, Notifications Placeholder banner, "My Active Tickets" tab, "Urgent & Overdue Work" tab, and "Full Ticket Inbox" tab with server-side filters and pagination.
+   4. UI View: Displays real StatCards, Notifications banner, "My Active Tickets" tab, "Urgent & Overdue Work" tab,
+      and "Full Ticket Inbox" tab with server-side filters and pagination.
+   5. Agent-to-Lead Ticket Consultation Workflow:
+      - Directly within the Ticket Detail view (`/agent/tickets/:id`) or the "Lead Consultations" tab (`?tab=queries`),
+        the agent clicks "Consult Team Lead".
+      - Submits inquiry with `ticketId`, `subject`, `category` (`technical_blocker`, `policy_exception`, `customer_dispute`, etc.),
+        and `urgency` (`low`, `normal`, `high`, `urgent`).
+      - Calls `POST /api/ticket-queries`. Creates MongoDB `TicketQuery` document, starts a threaded conversation,
+        and logs an audit event.
+      - Team Lead replies with guidance; the agent receives updates and can continue the conversation or mark it resolved.
 
-B. Team Lead Dashboard Flow:
-   1. Frontend (`/lead/dashboard`): Guarded by `<RoleRoute allowedRoles={['lead']}>`. Dispatches query `['teamLeadReport']` to `GET /api/reports/team`.
-   2. Express RBAC Guard (`requireRole(['lead'])`): If an Agent or Admin requests this endpoint, Express immediately responds with HTTP 403 Forbidden.
-   3. Service Layer (`getTeamLeadReport`):
-      - Computes team workload: total tickets, open, in progress, pending, resolved, closed, unassigned count, and overdue count.
-      - Iterates active workspace users and aggregates each agent's workload distribution.
-      - Gathers unassigned and overdue tickets for operational triage.
-      - Computes breakdowns by status, priority, and category.
-   4. Reassignment Workflow (`ReassignDropdown`):
-      - Changing the assignee triggers `PATCH /api/tickets/:id/assign`.
-      - Updates MongoDB `assignedTo`, records `ticket_assigned` in `AuditEvent`, and invalidates queries to synchronize all views immediately.
+B. Team Lead Dashboard & Operational Escalation Flow:
+   1. Frontend (`/lead/dashboard`): Guarded by `<RoleRoute allowedRoles={['lead']}>`. Offers 3 major sections:
+      - Section 1: "Workload & Queue Triage" (`tab=workload`): Dispatches query `['teamLeadReport']` to `GET /api/reports/team`.
+        Displays team workload, live agent capacity comparison, unassigned queue, and overdue triage with `ReassignDropdown`.
+      - Section 2: "Agent Inquiries & Guidance" (`tab=queries`): Dispatches query `['ticketQueriesList']` to `GET /api/ticket-queries`.
+        Allows Team Lead to filter inquiries, inspect ticket context, provide guidance replies via `POST /api/ticket-queries/:id/messages`,
+        or resolve the query via `PATCH /api/ticket-queries/:id/status`.
+      - Section 3: "Admin Reports & Escalations" (`tab=admin_reports`): Dispatches query `['adminReportsList']` to `GET /api/admin-reports`.
+        Allows Team Lead to submit formal operational reports to Admin regarding systemic issues (e.g. database pool exhaustion,
+        shift deficits) via modal calling `POST /api/admin-reports`. Tracks official executive directives issued by Admin.
 
 C. Workspace Administrator Dashboard Flow:
-   1. Frontend (`/admin/dashboard`): Guarded by `<RoleRoute allowedRoles={['admin']}>`. Dispatches queries for overview, users, settings, and audit ledger.
-   2. Express RBAC Guard: Endpoints `POST /api/users`, `PATCH /api/users/:id`, `PATCH /api/workspaces/current/settings`, `GET /api/reports/admin`, and `GET /api/audit` strictly enforce `requireRole(['admin'])`.
-   3. Workspace Settings Form:
-      - Admin modifies Workspace Name, Default Priority, or Customer Reopen toggle.
-      - Calls `PATCH /api/workspaces/current/settings`. Updates MongoDB document and logs `workspace_settings_updated` audit event.
-   4. Team Member Management:
-      - Admin lists roster, changes roles (Agent, Lead, Admin), and toggles active access.
+   1. Frontend (`/admin/dashboard`): Guarded by `<RoleRoute allowedRoles={['admin']}>`.
+   2. Workspace Overview Tab (`tab=overview`): Real-time metrics computed dynamically from MongoDB.
+   3. Team Lead Reports & Escalations Hub (`tab=reports`):
+      - Surfaces all operational reports and incident escalations submitted by Team Leads.
+      - Stat cards highlight total escalations, critical items, pending review, and resolved reports.
+      - Filterable by Status and Priority.
+      - "Issue Directive & Resolve" modal: Admin reviews findings, enters official executive directives,
+        and transitions report status (`acknowledged`, `in_progress`, `resolved`, `closed`) via `PATCH /api/admin-reports/:id/status`.
+   4. Staff Roster Management (`tab=team`):
+      - Lists roster with role badges and active indicators.
       - "Add Team Member" modal invokes `POST /api/users` with bcrypt password hashing and email uniqueness validation.
-      - Safety guard: Prevents admin from deactivating themselves or demoting the last active administrator.
-   5. Immutable Audit Ledger:
-      - Tabulated view of all tenant mutations, actors, actions, and previous/new state payloads with pagination.
+      - Role modifications and deactivations invoke `PATCH /api/users/:id`. Safety guard prevents demoting the last active administrator.
+   5. Global Reassignments (`tab=reassign`): Reallocate tickets across agents.
+   6. Workspace Settings (`tab=settings`): Update workspace name, default SLA priority, and customer reopen toggles.
+   7. Immutable Audit Ledger (`tab=audit`): Paginated audit stream of all workspace actions.
 
 --------------------------------------------------------------------------------
 4. INVENTORY OF NEW & MODIFIED FILES
 --------------------------------------------------------------------------------
 
 Backend:
-- `src/modules/reports/report.service.ts`: Aggregation and query service for Agent Summary, Team Lead Report, and Admin Overview.
-- `src/modules/reports/report.controller.ts`: Controllers wrapping report service calls with response helpers.
-- `src/modules/reports/report.routes.ts`: Reporting route definitions with strict RBAC guards (`/agent-summary` -> agent, `/team` -> lead, `/admin` -> admin).
-- `src/modules/workspaces/workspace.controller.ts`: Workspace profile retrieval and settings mutation with audit logging.
-- `src/modules/workspaces/workspace.routes.ts`: Workspace settings endpoints guarded by Admin role requirement.
+- `src/modules/ticketQueries/ticketQuery.model.ts`: [NEW] Mongoose schema for Agent <-> Team Lead consultations tied to `ticketId`.
+- `src/modules/ticketQueries/ticketQuery.service.ts`: [NEW] Query creation, message appending, status resolution, and audit logging.
+- `src/modules/ticketQueries/ticketQuery.controller.ts`: [NEW] Controller handlers with Zod schema validation.
+- `src/modules/ticketQueries/ticketQuery.routes.ts`: [NEW] Express routes mounted at `/api/ticket-queries` with RBAC guards.
+- `src/modules/adminReports/adminReport.model.ts`: [NEW] Mongoose schema for Team Lead <-> Admin operational reports & executive directives.
+- `src/modules/adminReports/adminReport.service.ts`: [NEW] Escalation creation, discussion threads, status updates, and directive tracking.
+- `src/modules/adminReports/adminReport.controller.ts`: [NEW] Controller handlers with Zod schema validation.
+- `src/modules/adminReports/adminReport.routes.ts`: [NEW] Express routes mounted at `/api/admin-reports` with Lead and Admin guards.
+- `src/modules/reports/report.service.ts`: Aggregation service for Agent Summary, Team Lead Report, and Admin Overview.
+- `src/modules/reports/report.controller.ts`: Controller wrapping reporting endpoints.
+- `src/modules/reports/report.routes.ts`: Reporting route definitions with strict RBAC guards.
+- `src/modules/workspaces/workspace.controller.ts`: Workspace settings retrieval and update.
+- `src/modules/workspaces/workspace.routes.ts`: Workspace settings endpoints guarded by Admin role.
 - `src/modules/users/user.controller.ts`: Staff roster management, user creation, and role/status modification.
-- `src/modules/users/user.routes.ts`: User management routes with Admin and Lead authorization guards.
+- `src/modules/users/user.routes.ts`: User management routes with Admin authorization.
+- `src/modules/audit/audit.model.ts`: Made `ticketId` optional to cleanly audit workspace-level administrative reports.
 - `src/modules/audit/audit.controller.ts`: Paginated workspace audit history query handler with action filters.
 - `src/modules/audit/audit.routes.ts`: Audit route definition guarded by Admin role requirement.
-- `src/modules/tickets/ticket.service.ts`: Extended with `getOverdueFilter` helper, `overdue` query flag, `highPriority` query flag, and multi-status parsing.
-- `src/modules/tickets/staffTicket.controller.ts`: Extended to handle `assignedTo=me` and overdue/highPriority query parameters.
-- `src/app.ts`: Registered reports, workspaces, users, and audit routes.
-- `src/scripts/seed.ts`: Added realistic unassigned and overdue tickets for rich dashboard verification.
-- `tests/testDb.ts`: Fast local MongoDB connection helper with in-memory fallback for reliable automated testing.
-- `tests/dashboard_rbac.test.ts`: Automated 19-test suite verifying dashboard reporting and strict role segregation.
+- `src/modules/tickets/ticket.service.ts`: Overdue SLA calculation, priority filters, and assignment mutations.
+- `src/modules/tickets/staffTicket.controller.ts`: Extended with `assignedTo=me` and overdue/highPriority query filters.
+- `src/shared/utils/apiResponse.ts`: Added and exported `sendCreated` helper for standard HTTP 201 responses.
+- `src/app.ts`: Registered reports, workspaces, users, audit, ticketQueries, and adminReports routes.
+- `src/scripts/seed.ts`: Seeded realistic sample tickets, overdue items, ticket queries, and admin incident reports.
+- `tests/testDb.ts`: Fast local MongoDB connection helper with in-memory fallback for automated testing.
+- `tests/dashboard_rbac.test.ts`: Automated 19-test suite verifying dashboard reporting and RBAC enforcement.
+- `tests/queries_reports.test.ts`: [NEW] Automated 11-test suite verifying Agent <-> Lead consultations and Lead <-> Admin escalations.
 
 Frontend:
-- `src/api/client.ts`: Added typed API client methods for reporting, workspace management, user administration, and audit logs.
+- `src/api/client.ts`: Added full typed API client methods for Ticket Queries and Admin Reports.
+- `src/components/Badges.tsx`: Added `QueryStatusBadge` and `UrgencyBadge` alongside `RoleBadge`, `StatusBadge`, `PriorityBadge`.
+- `src/components/Navbar.tsx`: Sanitized navigation bar. Hidden public links for staff; added role-appropriate links.
+- `src/components/EmptyState.tsx`: Extended to support both object-style and flat prop-style actions (`actionLabel`, `onAction`).
 - `src/components/StatCard.tsx`: Reusable metric card component with color variants and loading skeletons.
 - `src/components/LoadingState.tsx`: Reusable loading state component supporting spinners, card skeletons, and table skeletons.
-- `src/components/EmptyState.tsx`: Reusable empty state component with contextual icons and call-to-action buttons.
 - `src/components/ErrorState.tsx`: Reusable error boundary component with retry support.
 - `src/components/ReassignDropdown.tsx`: In-line ticket reassignment component with TanStack Query mutations.
 - `src/components/NotificationsPlaceholder.tsx`: Notification center preview banner with toggle and unread alert indicator.
-- `src/components/RoleRoute.tsx`: Route guard enforcing client-side role authorization with custom 403 Forbidden screen and portal redirection.
-- `src/components/Badges.tsx`: Added `RoleBadge` alongside `StatusBadge`, `PriorityBadge`, and `CategoryBadge`.
-- `src/components/Navbar.tsx`: Updated with role-permitted navigation links (`Agent Dashboard` for agent, `Team Lead Portal` for lead, `Admin Portal` for admin).
-- `src/pages/AgentDashboardPage.tsx`: Full agent portal with active work queue, urgent/overdue work, inbox with filters, and activity history.
-- `src/pages/TeamLeadDashboardPage.tsx`: Full lead portal with team workload, agent comparison, queue triage, and domain reporting.
-- `src/pages/AdminDashboardPage.tsx`: Full administrator portal with workspace overview, team roster modal, reassignment queue, settings form, and audit ledger.
-- `src/pages/TicketDetailPage.tsx`: Staff ticket thread with dynamic back button routing to each role's portal.
-- `src/context/AuthContext.tsx`: Updated `login` method to return authenticated `User` for role-based navigation.
+- `src/components/RoleRoute.tsx`: Route guard enforcing client-side role authorization with custom 403 Forbidden screen.
+- `src/pages/AgentDashboardPage.tsx`: Enhanced with "Team Lead Consultations" tab, query creation modal, and discussion drawer.
+- `src/pages/TicketDetailPage.tsx`: Added "Consult Team Lead" action button and active consultation status card in ticket sidebar.
+- `src/pages/TeamLeadDashboardPage.tsx`: Enhanced with 3 dedicated hubs: Workload Triage, Agent Inquiries, and Admin Reports.
+- `src/pages/AdminDashboardPage.tsx`: Enhanced with "Team Lead Reports & Escalations" hub, KPI stat cards, and directive modal.
 - `src/pages/LoginPage.tsx`: Automatic routing to role-specific dashboard upon login.
-- `src/App.tsx`: Configured strict role-protected routes (`/agent/dashboard` -> agent, `/lead/dashboard` -> lead, `/admin/dashboard` -> admin).
+- `src/App.tsx`: Configured strict role-protected routes for all personas.
 
 --------------------------------------------------------------------------------
-5. VERIFICATION OF ACCEPTANCE CRITERIA
+5. POST-REVIEW MODIFICATIONS SUMMARY (PHASE 3 ENHANCEMENTS)
+--------------------------------------------------------------------------------
+
+1. Customer vs Staff Navbar Sanitization:
+   - Problem Identified: Agent dashboard previously contained "Submit ticket" and "Help center"
+     links which are customer-facing and cluttered the staff workspace.
+   - Solution Implemented: Modified `Navbar.tsx` so that public actions are only visible to
+     unauthenticated visitors (`!user`). Staff members see strictly operational links corresponding
+     to their role, plus an unobtrusive external preview link to view the knowledge base.
+
+2. Agent <-> Team Lead Ticket Queries (`TicketQuery`):
+   - Problem Identified: Agents resolving tickets needed a structured, internal communication channel
+     to ask Team Leads questions tied to specific tickets without exposing chatter to customers.
+   - Solution Implemented:
+     - Created `TicketQuery` model with fields for `ticketId`, `agentId`, `teamLeadId`, `subject`,
+       `category`, `urgency`, and threaded `messages`.
+     - Added endpoints at `/api/ticket-queries` with strict RBAC (Agent creates, Lead/Admin responds).
+     - Integrated quick-action button on `TicketDetailPage.tsx` and dedicated tab on `AgentDashboardPage.tsx`.
+     - Integrated supervisor guidance console on `TeamLeadDashboardPage.tsx` with one-click resolution.
+
+3. Team Lead <-> Admin Operational Escalations (`AdminReport`):
+   - Problem Identified: Team Leads lacked a formal reporting channel to escalate systemic bottlenecks,
+     infrastructure outages, staffing deficits, or policy inquiries to Workspace Admins.
+   - Solution Implemented:
+     - Created `AdminReport` model with fields for `leadId`, `title`, `category`, `priority`, `summary`,
+       `actionRequired`, optional `ticketId`, threaded `messages`, and Admin's binding `adminDirective`.
+     - Added endpoints at `/api/admin-reports` with strict RBAC (Lead creates, Admin issues directives).
+     - Integrated report submission modal and status tracker on `TeamLeadDashboardPage.tsx`.
+     - Integrated executive directive & resolution console on `AdminDashboardPage.tsx`.
+
+4. Comprehensive 4-Role Persona Alignment:
+   - Re-evaluated the workflow from the perspective of all 4 personas:
+     - Customer: Self-service & track. Never sees internal chatter or staff navigation.
+     - Agent: Queue execution, SLA urgency, and supervisor consultation.
+     - Team Lead: Workload rebalancing, agent guidance, and administrative escalation.
+     - Admin: Global tenant governance, user management, audit trails, and executive directives.
+
+--------------------------------------------------------------------------------
+6. VERIFICATION OF ACCEPTANCE CRITERIA
 --------------------------------------------------------------------------------
 [x] Agent dashboard displays open and in-progress tickets assigned to current user: VERIFIED
 [x] Agent dashboard provides ticket inbox with search, status/priority/category filters, and pagination: VERIFIED
 [x] Agent dashboard highlights high-priority (P1/P2) and overdue work: VERIFIED
 [x] Agent dashboard provides ticket details navigation and activity history: VERIFIED
-[x] Notifications area placeholder is integrated: VERIFIED
+[x] Agent dashboard sanitized of customer-facing links (Submit Ticket / Help Center): VERIFIED
+[x] Agent can initiate and manage ticket queries to Team Lead tied to ticketId: VERIFIED
+[x] Ticket detail page provides "Consult Team Lead" trigger and active consultation status: VERIFIED
 [x] Team lead dashboard displays team workload metrics: VERIFIED
 [x] Team lead dashboard surfaces unassigned and overdue tickets: VERIFIED
 [x] Team lead dashboard displays agent workload comparison: VERIFIED
 [x] Team lead dashboard provides live reassignment controls backed by API mutations: VERIFIED
 [x] Team lead dashboard provides team-level status, priority, and category reporting: VERIFIED
+[x] Team lead dashboard provides "Agent Inquiries & Guidance" review console: VERIFIED
+[x] Team lead can formally submit operational reports and escalations to Admin: VERIFIED
 [x] Admin dashboard displays workspace overview: VERIFIED
 [x] Admin dashboard displays live ticket counts by status and priority: VERIFIED
+[x] Admin dashboard provides "Team Lead Reports & Escalations" management console: VERIFIED
+[x] Admin can review operational reports, post responses, and issue binding directives: VERIFIED
 [x] Admin dashboard provides team member management (list, add, edit role, toggle active): VERIFIED
 [x] Admin dashboard provides global ticket assignment and reassignment: VERIFIED
 [x] Admin dashboard provides workspace settings navigation and mutation: VERIFIED
@@ -155,6 +249,6 @@ Frontend:
 [x] Reusable cards, tables, filters, status badges, loading states, empty states, and error states created: VERIFIED
 [x] Role-based navigation ensures each role sees ONLY their permitted dashboard and navigation link: VERIFIED
 [x] Hiding frontend controls never replaces backend authorization (HTTP 403 verified on all guarded endpoints): VERIFIED
-[x] 32/32 automated integration tests pass in Vitest: VERIFIED
-[x] Full production build passes with 0 TypeScript errors: VERIFIED
+[x] 43/43 automated integration tests pass in Vitest across 4 suites: VERIFIED
+[x] Full production build passes with 0 TypeScript errors (`tsc && vite build`): VERIFIED
 ================================================================================

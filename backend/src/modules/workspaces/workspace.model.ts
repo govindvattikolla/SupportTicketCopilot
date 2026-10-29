@@ -1,4 +1,6 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
+import { ISLASettings } from '../sla/sla.types';
+import { DEFAULT_SLA_SETTINGS } from '../sla/slaEngine';
 
 export interface IWorkspace extends Document {
   _id: Types.ObjectId;
@@ -8,6 +10,7 @@ export interface IWorkspace extends Document {
   settings: {
     defaultPriority: 'P1' | 'P2' | 'P3' | 'P4';
     allowCustomerReopen: boolean;
+    slaSettings: ISLASettings;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -42,6 +45,10 @@ const WorkspaceSchema = new Schema<IWorkspace>(
       allowCustomerReopen: {
         type: Boolean,
         default: true,
+      },
+      slaSettings: {
+        type: Schema.Types.Mixed,
+        default: () => JSON.parse(JSON.stringify(DEFAULT_SLA_SETTINGS)),
       },
     },
   },

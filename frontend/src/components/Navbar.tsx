@@ -4,17 +4,12 @@ import {
   Layers,
   LogIn,
   LogOut,
-  Ticket,
   PlusCircle,
   HelpCircle,
-  Users,
-  ShieldCheck,
-  MessageSquareShare,
-  ClipboardList,
   ExternalLink,
-  FileSpreadsheet,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { NotificationCenter } from './NotificationCenter';
 
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -25,6 +20,18 @@ export const Navbar: React.FC = () => {
     await logout();
     navigate('/login');
   };
+
+  // If on a staff dashboard, all navigation & controls are integrated into the left sidebar
+  const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
+  const isDashboard =
+    normalizedPath === '/agent/dashboard' ||
+    normalizedPath === '/agent/tickets' ||
+    normalizedPath === '/lead/dashboard' ||
+    normalizedPath === '/admin/dashboard';
+
+  if (isDashboard) {
+    return null;
+  }
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -85,110 +92,6 @@ export const Navbar: React.FC = () => {
               </Link>
             </>
           )}
-
-          {/* Authenticated Staff Navigation (Customized per Role) */}
-          {user && (
-            <>
-              {/* Agent Navigation */}
-              {user.role === 'agent' && (
-                <>
-                  <Link
-                    to="/agent/dashboard"
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                      location.pathname.startsWith('/agent') && !location.search.includes('tab=queries')
-                        ? 'bg-brand-600 text-white shadow-sm'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <Ticket className="w-3.5 h-3.5" />
-                    <span>Agent Dashboard</span>
-                  </Link>
-
-                  <Link
-                    to="/agent/dashboard?tab=queries"
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                      location.search.includes('tab=queries')
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <MessageSquareShare className="w-3.5 h-3.5" />
-                    <span>Lead Consultations</span>
-                  </Link>
-                </>
-              )}
-
-              {/* Team Lead Navigation */}
-              {user.role === 'lead' && (
-                <>
-                  <Link
-                    to="/lead/dashboard"
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                      location.pathname.startsWith('/lead') && !location.search.includes('tab=')
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>Team Lead Portal</span>
-                  </Link>
-
-                  <Link
-                    to="/lead/dashboard?tab=queries"
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                      location.search.includes('tab=queries')
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <MessageSquareShare className="w-3.5 h-3.5" />
-                    <span>Agent Inquiries</span>
-                  </Link>
-
-                  <Link
-                    to="/lead/dashboard?tab=admin_reports"
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                      location.search.includes('tab=admin_reports')
-                        ? 'bg-purple-600 text-white shadow-sm'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <ClipboardList className="w-3.5 h-3.5" />
-                    <span>Admin Reports</span>
-                  </Link>
-                </>
-              )}
-
-              {/* Administrator Navigation */}
-              {user.role === 'admin' && (
-                <>
-                  <Link
-                    to="/admin/dashboard"
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                      location.pathname.startsWith('/admin') && !location.search.includes('tab=reports')
-                        ? 'bg-rose-600 text-white shadow-sm'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Admin Portal</span>
-                  </Link>
-
-                  <Link
-                    to="/admin/dashboard?tab=reports"
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                      location.search.includes('tab=reports')
-                        ? 'bg-rose-600 text-white shadow-sm'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    <span>Lead Escalations & Reports</span>
-                  </Link>
-                </>
-              )}
-            </>
-          )}
         </nav>
 
         {/* User Session Area */}
@@ -206,6 +109,9 @@ export const Navbar: React.FC = () => {
                 <span>Help Center View</span>
                 <ExternalLink className="w-3 h-3" />
               </Link>
+
+              {/* In-App Notifications */}
+              <NotificationCenter />
 
               <div className="hidden md:flex flex-col items-end">
                 <span className="text-xs font-semibold text-slate-200">{user.name}</span>

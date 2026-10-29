@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { Navbar } from './components/Navbar';
 import { SupportPage } from './pages/SupportPage';
@@ -247,6 +247,14 @@ function HelpCenterHome() {
 }
 
 export function App() {
+  const location = useLocation();
+  const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
+  const isDashboard =
+    normalizedPath === '/agent/dashboard' ||
+    normalizedPath === '/agent/tickets' ||
+    normalizedPath === '/lead/dashboard' ||
+    normalizedPath === '/admin/dashboard';
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-['Inter',sans-serif]">
       <Navbar />
@@ -306,9 +314,11 @@ export function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      <footer className="border-t border-slate-800 py-4 px-6 text-center text-xs text-slate-500 mt-auto">
-        SupportFlow Customer Support Operations Platform • All rights reserved
-      </footer>
+      {!isDashboard && (
+        <footer className="border-t border-slate-800 py-4 px-6 text-center text-xs text-slate-500 mt-auto">
+          SupportFlow Customer Support Operations Platform • All rights reserved
+        </footer>
+      )}
     </div>
   );
 }

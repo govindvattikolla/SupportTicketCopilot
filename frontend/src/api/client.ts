@@ -56,8 +56,44 @@ export interface Ticket {
   firstResponseAt?: string;
   resolvedAt?: string;
   closedAt?: string;
+  sla?: TicketSLA;
   createdAt: string;
   updatedAt: string;
+}
+
+export type SLAMetricStatus = 'healthy' | 'warning' | 'breached' | 'paused' | 'satisfied';
+
+export interface TicketSLA {
+  firstResponseDeadline?: string;
+  resolutionDeadline?: string;
+  firstResponseAchievedAt?: string;
+  resolutionAchievedAt?: string;
+  isFirstResponseBreached: boolean;
+  isResolutionBreached: boolean;
+  isWarningSent: boolean;
+  isEscalated: boolean;
+  pausedAt?: string;
+  totalPausedMinutes: number;
+}
+
+export interface SLAEvaluationResult {
+  firstResponse: {
+    status: SLAMetricStatus;
+    deadline?: string;
+    achievedAt?: string;
+    isBreached: boolean;
+    remainingMinutes: number;
+    percentElapsed: number;
+  };
+  resolution: {
+    status: SLAMetricStatus;
+    deadline?: string;
+    achievedAt?: string;
+    isBreached: boolean;
+    remainingMinutes: number;
+    percentElapsed: number;
+  };
+  overallStatus: SLAMetricStatus;
 }
 
 export interface Message {
@@ -236,10 +272,18 @@ export const listTicketsApi = async (params: ListTicketsParams): Promise<ListTic
 
 export const getTicketDetailsApi = async (
   id: string
-): Promise<{ ticket: Ticket; messages: Message[]; auditEvents: AuditEvent[] }> => {
-  return apiClient<{ ticket: Ticket; messages: Message[]; auditEvents: AuditEvent[] }>(
-    `/api/tickets/${id}`
-  );
+): Promise<{
+  ticket: Ticket;
+  messages: Message[];
+  auditEvents: AuditEvent[];
+  slaEvaluation?: SLAEvaluationResult;
+}> => {
+  return apiClient<{
+    ticket: Ticket;
+    messages: Message[];
+    auditEvents: AuditEvent[];
+    slaEvaluation?: SLAEvaluationResult;
+  }>(`/api/tickets/${id}`);
 };
 
 export const updateTicketStatusApi = async (
@@ -716,5 +760,111 @@ export const updateAdminReportStatusApi = async (
     body: JSON.stringify({ status, adminDirective }),
   });
 };
+
+// ============================================================================
+// IN-APP NOTIFICATIONS & ALERTS
+// ============================================================================
+export type NotificationType =
+  | 'ticket_assigned'
+  | 'ticket_reassigned'
+  | 'ticket_reply'
+  | 'status_changed'
+  | 'sla_warning'
+  | 'sla_breached';
+
+export interface AppNotification {
+  _id: string;
+  workspaceId: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  ticketId?: string;
+  ticketNumber?: string;
+  isRead: boolean;
+  readAt?: string;
+  metadata?: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListNotificationsResult {
+  notifications: AppNotification[];
+  total: number;
+  unreadCount: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
+
+export const getNotificationsApi = async (params: {
+  page?: number;
+  limit?: number;
+  unreadOnly?: boolean;
+} = {}): Promise<ListNotificationsResult> => {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', params.page.toString());
+  if (params.limit) query.set('limit', params.limit.toString());
+  if (params.unreadOnly) query.set('unreadOnly', 'true');
+
+  return apiClient<ListNotificationsResult>(`/api/notifications?${query.toString()}`);
+};
+
+export const markNotificationReadApi = async (id: string): Promise<AppNotification> => {
+  return apiClient<AppNotification>(`/api/notifications/${id}/read`, {
+    method: 'PATCH',
+  });
+};
+
+export const markAllNotificationsReadApi = async (): Promise<{ modifiedCount: number }> => {
+  return apiClient<{ modifiedCount: number }>(`/api/notifications/read-all`, {
+    method: 'PATCH',
+  });
+};
+
+// ============================================================================
+// SLA POLICIES & BUSINESS HOURS
+// ============================================================================
+export interface ISLAPriorityTargets {
+  firstResponseMinutes: number;
+  resolutionMinutes: number;
+}
+
+export interface IBusinessHoursConfig {
+  enabled: boolean;
+  timeZone: string;
+  operatingHours: {
+    start: string;
+    end: string;
+  };
+  workingDays: number[];
+  holidays: string[];
+}
+
+export interface ISLASettings {
+  enabled: boolean;
+  warningThresholdPercent: number;
+  businessHours: IBusinessHoursConfig;
+  priorities: {
+    P1: ISLAPriorityTargets;
+    P2: ISLAPriorityTargets;
+    P3: ISLAPriorityTargets;
+    P4: ISLAPriorityTargets;
+  };
+}
+
+export const getWorkspaceSLASettingsApi = async (): Promise<ISLASettings> => {
+  return apiClient<ISLASettings>('/api/workspaces/current/sla');
+};
+
+export const updateWorkspaceSLASettingsApi = async (
+  dto: Partial<ISLASettings>
+): Promise<ISLASettings> => {
+  return apiClient<ISLASettings>('/api/workspaces/current/sla', {
+    method: 'PATCH',
+    body: JSON.stringify(dto),
+  });
+};
+
 
 

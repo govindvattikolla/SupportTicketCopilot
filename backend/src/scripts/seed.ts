@@ -8,6 +8,8 @@ import { Message } from '../modules/messages/message.model';
 import { AuditEvent } from '../modules/audit/audit.model';
 import { TicketQuery } from '../modules/ticketQueries/ticketQuery.model';
 import { AdminReport } from '../modules/adminReports/adminReport.model';
+import { Notification } from '../modules/notifications/notification.model';
+import { calculateInitialSLADeadlines, DEFAULT_SLA_SETTINGS } from '../modules/sla/slaEngine';
 
 export const seedDatabase = async () => {
   console.log('🌱 Starting database seed for SupportFlow...');
@@ -348,6 +350,74 @@ export const seedDatabase = async () => {
     });
 
     console.log('Sample admin operational reports seeded successfully.');
+  }
+
+  // Ensure all seeded tickets have SLA deadlines calculated
+  const allTickets = await Ticket.find({ workspaceId: workspace._id });
+  for (const t of allTickets) {
+    if (!t.sla || !t.sla.resolutionDeadline) {
+      const { firstResponseDeadline, resolutionDeadline } = calculateInitialSLADeadlines(
+        t.createdAt,
+        t.priority as any,
+        workspace.settings?.slaSettings || DEFAULT_SLA_SETTINGS
+      );
+      t.sla = {
+        firstResponseDeadline,
+        resolutionDeadline,
+        isFirstResponseBreached: t.priority === 'P1' && t.ticketNumber === 'TCK-1005',
+        isResolutionBreached: t.priority === 'P1' && t.ticketNumber === 'TCK-1005',
+        isWarningSent: true,
+        isEscalated: t.ticketNumber === 'TCK-1005',
+        totalPausedMinutes: 0,
+        pauseHistory: [],
+      };
+      await t.save();
+    }
+  }
+
+  // Seed sample in-app notifications if empty
+  const existingNotifs = await Notification.countDocuments({ workspaceId: workspace._id });
+  if (existingNotifs === 0) {
+    console.log('Seeding initial notifications...');
+    await Notification.create([
+      {
+        workspaceId: workspace._id,
+        userId: createdUsers['agent']._id,
+        type: 'ticket_assigned',
+        title: 'New Ticket Assigned: TCK-1001',
+        message: 'Sarah Admin assigned ticket TCK-1001 ("Cannot access billing invoice PDF") to you.',
+        ticketNumber: 'TCK-1001',
+        isRead: false,
+      },
+      {
+        workspaceId: workspace._id,
+        userId: createdUsers['agent']._id,
+        type: 'sla_warning',
+        title: 'SLA Warning: Ticket TCK-1005',
+        message: 'Ticket TCK-1005 is approaching its first response SLA deadline (80% elapsed).',
+        ticketNumber: 'TCK-1005',
+        isRead: false,
+      },
+      {
+        workspaceId: workspace._id,
+        userId: createdUsers['lead']._id,
+        type: 'sla_breached',
+        title: 'SLA Escalation: Ticket TCK-1005',
+        message: 'High-priority ticket TCK-1005 has breached its first response SLA commitment. Supervisor attention required.',
+        ticketNumber: 'TCK-1005',
+        isRead: false,
+      },
+      {
+        workspaceId: workspace._id,
+        userId: createdUsers['agent']._id,
+        type: 'ticket_reply',
+        title: 'Customer Reply: TCK-1002',
+        message: 'Emma Watson replied to ticket TCK-1002 ("Critical API latency spike on webhook callbacks").',
+        ticketNumber: 'TCK-1002',
+        isRead: true,
+        readAt: new Date(),
+      },
+    ]);
   }
 
   console.log(`

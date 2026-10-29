@@ -29,6 +29,7 @@ import { ReassignDropdown } from '../components/ReassignDropdown';
 import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
+import { DashboardLayout } from '../components/DashboardLayout';
 import {
   Building2,
   Users,
@@ -51,30 +52,46 @@ import {
   X,
   ShieldAlert,
   Clock,
+  Timer,
 } from 'lucide-react';
+import { SLAConfigEditor } from '../components/SLAConfigEditor';
 
 export const AdminDashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Active Admin Tab: 'overview' | 'reports' | 'team' | 'reassign' | 'settings' | 'audit'
+  // Active Admin Tab: 'overview' | 'reports' | 'team' | 'reassign' | 'sla' | 'settings' | 'audit'
   const tabParam = searchParams.get('tab');
-  const [adminTab, setAdminTab] = useState<'overview' | 'reports' | 'team' | 'reassign' | 'settings' | 'audit'>(
-    tabParam === 'reports' ? 'reports' : tabParam === 'users' ? 'team' : tabParam === 'audit' ? 'audit' : 'overview'
+  const [adminTab, setAdminTab] = useState<
+    'overview' | 'reports' | 'team' | 'reassign' | 'sla' | 'settings' | 'audit'
+  >(
+    tabParam === 'reports'
+      ? 'reports'
+      : tabParam === 'users'
+      ? 'team'
+      : tabParam === 'audit'
+      ? 'audit'
+      : tabParam === 'sla'
+      ? 'sla'
+      : 'overview'
   );
 
   useEffect(() => {
     if (tabParam === 'reports') setAdminTab('reports');
     else if (tabParam === 'users') setAdminTab('team');
     else if (tabParam === 'audit') setAdminTab('audit');
+    else if (tabParam === 'sla') setAdminTab('sla');
   }, [tabParam]);
 
-  const handleTabChange = (tab: 'overview' | 'reports' | 'team' | 'reassign' | 'settings' | 'audit') => {
+  const handleTabChange = (
+    tab: 'overview' | 'reports' | 'team' | 'reassign' | 'sla' | 'settings' | 'audit'
+  ) => {
     setAdminTab(tab);
     if (tab === 'reports') setSearchParams({ tab: 'reports' });
     else if (tab === 'team') setSearchParams({ tab: 'users' });
     else if (tab === 'audit') setSearchParams({ tab: 'audit' });
+    else if (tab === 'sla') setSearchParams({ tab: 'sla' });
     else setSearchParams({});
   };
 
@@ -321,33 +338,88 @@ export const AdminDashboardPage: React.FC = () => {
     if (adminTab === 'audit') refetchAudit();
   };
 
+  const sidebarItems = [
+    {
+      id: 'overview',
+      label: 'Workspace Overview',
+      icon: <Building2 className="w-4 h-4 text-brand-400" />,
+    },
+    {
+      id: 'reports',
+      label: 'Team Lead Escalations',
+      icon: <ClipboardList className="w-4 h-4 text-rose-400" />,
+      badge:
+        (adminReportsResult?.summary?.submitted || 0) > 0
+          ? {
+              text: `${adminReportsResult?.summary?.submitted} New`,
+              variant: 'danger' as const,
+            }
+          : undefined,
+    },
+    {
+      id: 'team',
+      label: 'Team Member Management',
+      icon: <Users className="w-4 h-4 text-brand-400" />,
+      badge: users.length > 0 ? { text: users.length } : undefined,
+    },
+    {
+      id: 'reassign',
+      label: 'Assignment & Reassignment',
+      icon: <ShieldCheck className="w-4 h-4 text-brand-400" />,
+    },
+    {
+      id: 'sla',
+      label: 'SLA Policies & Business Hours',
+      icon: <Timer className="w-4 h-4 text-brand-400" />,
+    },
+    {
+      id: 'settings',
+      label: 'Workspace Settings',
+      icon: <Settings className="w-4 h-4 text-brand-400" />,
+    },
+    {
+      id: 'audit',
+      label: 'Immutable Audit History',
+      icon: <Activity className="w-4 h-4 text-brand-400" />,
+    },
+  ];
+
   return (
-    <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-extrabold text-white tracking-tight">
-              Workspace Administration
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-              Admin Portal
-            </span>
-          </div>
-          <p className="text-slate-400 text-xs sm:text-sm mt-1">
-            Manage workspace configuration, team member roster, global assignment queue, and audit ledger.
-          </p>
-        </div>
+    <DashboardLayout
+      portalTitle="Workspace Admin"
+      roleBadgeText="Admin Portal"
+      roleBadgeVariant="admin"
+      accentColor="rose"
+      headerTitle="Workspace Administration"
+      headerSubtitle="Manage workspace configuration, team member roster, global assignment queue, SLA policies, and audit ledger."
+      items={sidebarItems}
+      activeItemId={adminTab}
+      onSelectItemId={(id) => handleTabChange(id as any)}
+      sidebarFooterAction={{
+        label: 'Add Team Member',
+        icon: <UserPlus className="w-4 h-4" />,
+        onClick: () => setShowAddMemberModal(true),
+      }}
+      headerActions={
+        <>
+          <button
+            onClick={() => setShowAddMemberModal(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium shadow-sm transition"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>Add Member</span>
+          </button>
 
-        <button
-          onClick={handleRefreshAll}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium transition self-start sm:self-auto"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Refresh Workspace</span>
-        </button>
-      </div>
-
+          <button
+            onClick={handleRefreshAll}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium transition"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Refresh</span>
+          </button>
+        </>
+      }
+    >
       {/* Workspace Overview & Aggregated Statistics Cards */}
       {overviewError ? (
         <ErrorState
@@ -356,7 +428,7 @@ export const AdminDashboardPage: React.FC = () => {
           onRetry={refetchOverview}
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <StatCard
             title="Total Workspace Tickets"
             value={overview?.ticketCounts?.total ?? 0}
@@ -364,7 +436,7 @@ export const AdminDashboardPage: React.FC = () => {
             icon={Layers}
             variant="brand"
             isLoading={overviewLoading}
-            onClick={() => setAdminTab('overview')}
+            onClick={() => handleTabChange('overview')}
           />
           <StatCard
             title="Active Team Members"
@@ -373,7 +445,7 @@ export const AdminDashboardPage: React.FC = () => {
             icon={Users}
             variant="indigo"
             isLoading={overviewLoading}
-            onClick={() => setAdminTab('team')}
+            onClick={() => handleTabChange('team')}
           />
           <StatCard
             title="Ticket Resolution Rate"
@@ -393,95 +465,10 @@ export const AdminDashboardPage: React.FC = () => {
             icon={Activity}
             variant="amber"
             isLoading={overviewLoading}
-            onClick={() => setAdminTab('reassign')}
+            onClick={() => handleTabChange('reassign')}
           />
         </div>
       )}
-
-      {/* Admin Navigation Tabs */}
-      <div className="flex border-b border-slate-800 mb-6 gap-2 sm:gap-4 overflow-x-auto">
-        <button
-          onClick={() => handleTabChange('overview')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            adminTab === 'overview'
-              ? 'border-brand-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Building2 className="w-4 h-4" />
-          <span>Workspace Overview</span>
-        </button>
-
-        <button
-          onClick={() => handleTabChange('reports')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            adminTab === 'reports'
-              ? 'border-rose-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <ClipboardList className="w-4 h-4 text-rose-400" />
-          <span>Team Lead Reports & Escalations</span>
-          {adminReportsResult?.summary && adminReportsResult.summary.submitted > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/20 text-rose-300 font-bold">
-              {adminReportsResult.summary.submitted} New
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => handleTabChange('team')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            adminTab === 'team'
-              ? 'border-brand-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Team Member Management</span>
-          {users.length > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300">
-              {users.length}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => handleTabChange('reassign')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            adminTab === 'reassign'
-              ? 'border-brand-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" />
-          <span>Assignment & Reassignment</span>
-        </button>
-
-        <button
-          onClick={() => handleTabChange('settings')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            adminTab === 'settings'
-              ? 'border-brand-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          <span>Workspace Settings</span>
-        </button>
-
-        <button
-          onClick={() => handleTabChange('audit')}
-          className={`pb-3 px-2 text-xs sm:text-sm font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-            adminTab === 'audit'
-              ? 'border-brand-500 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Activity className="w-4 h-4" />
-          <span>Audit History</span>
-        </button>
-      </div>
 
       {/* TAB 1: OVERVIEW & ANALYTICS */}
       {adminTab === 'overview' && (
@@ -1077,6 +1064,42 @@ export const AdminDashboardPage: React.FC = () => {
               <span>{settingsMutation.isPending ? 'Saving Settings...' : 'Save Settings'}</span>
             </button>
           </form>
+
+          {/* SLA Policies & Business Hours Section in Settings */}
+          <div className="mt-10 pt-8 border-t border-slate-800">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-9 h-9 rounded-xl bg-brand-500/10 text-brand-400 border border-brand-500/20 flex items-center justify-center">
+                <Timer className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">SLA Policies & Business Hours</h3>
+                <p className="text-xs text-slate-400">
+                  Target response and resolution deadlines with working hours calculation
+                </p>
+              </div>
+            </div>
+
+            <SLAConfigEditor />
+          </div>
+        </section>
+      )}
+
+      {/* TAB: DEDICATED SLA POLICIES & BUSINESS HOURS */}
+      {adminTab === 'sla' && (
+        <section className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 max-w-4xl shadow-xl space-y-6">
+          <div className="flex items-center gap-3 pb-5 border-b border-slate-800">
+            <div className="w-10 h-10 rounded-xl bg-brand-500/10 text-brand-400 border border-brand-500/20 flex items-center justify-center">
+              <Timer className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white">SLA Policies & Business Hours</h2>
+              <p className="text-xs text-slate-400">
+                Configure first-response and resolution targets by priority, time zone, working hours, and observed holidays
+              </p>
+            </div>
+          </div>
+
+          <SLAConfigEditor />
         </section>
       )}
 
@@ -1519,6 +1542,6 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
         </div>
       )}
-    </main>
+    </DashboardLayout>
   );
 };
