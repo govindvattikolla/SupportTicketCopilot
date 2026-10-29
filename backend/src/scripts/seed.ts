@@ -94,10 +94,8 @@ export const seedDatabase = async () => {
     }
   }
 
-  // Seed sample tickets if empty
-  const existingTickets = await Ticket.countDocuments({ workspaceId: workspace._id });
-  if (existingTickets === 0) {
-    console.log('Seeding initial sample tickets...');
+  // Seed sample tickets (idempotently ensure all sample tickets exist)
+  console.log('Checking sample tickets...');
 
     const sampleTickets = [
       {
@@ -207,49 +205,56 @@ export const seedDatabase = async () => {
     ];
 
     for (const t of sampleTickets) {
-      const ticket = await Ticket.create(t);
+      let ticket = await Ticket.findOne({ workspaceId: workspace._id, ticketNumber: t.ticketNumber });
+      if (!ticket) {
+        ticket = await Ticket.create(t);
 
-      // Audit event
-      await AuditEvent.create({
-        ticketId: ticket._id,
-        workspaceId: workspace._id,
-        actor: { type: 'customer', name: ticket.customer.name },
-        action: 'ticket_created',
-        details: { ticketNumber: ticket.ticketNumber, priority: ticket.priority },
-      });
+        // Audit event
+        await AuditEvent.create({
+          ticketId: ticket._id,
+          workspaceId: workspace._id,
+          actor: { type: 'customer', name: ticket.customer.name },
+          action: 'ticket_created',
+          details: { ticketNumber: ticket.ticketNumber, priority: ticket.priority },
+        });
 
-      // Sample customer initial message
-      await Message.create({
-        ticketId: ticket._id,
-        workspaceId: workspace._id,
-        type: 'reply',
-        sender: {
-          type: 'customer',
-          name: ticket.customer.name,
-          email: ticket.customer.email,
-        },
-        content: ticket.description,
-      });
-
-      // Sample internal note for TCK-1002
-      if (ticket.ticketNumber === 'TCK-1002') {
+        // Sample customer initial message
         await Message.create({
           ticketId: ticket._id,
           workspaceId: workspace._id,
-          type: 'internal_note',
+          type: 'reply',
           sender: {
-            type: 'agent',
-            userId: createdUsers['lead']._id,
-            name: createdUsers['lead'].name,
-            email: createdUsers['lead'].email,
+            type: 'customer',
+            name: ticket.customer.name,
+            email: ticket.customer.email,
           },
-          content: 'Investigating webhook worker cluster. CPU usage is currently normal.',
+          content: ticket.description,
         });
+
+        // Sample internal note for TCK-1002
+        if (ticket.ticketNumber === 'TCK-1002') {
+          await Message.create({
+            ticketId: ticket._id,
+            workspaceId: workspace._id,
+            type: 'internal_note',
+            sender: {
+              type: 'agent',
+              userId: createdUsers['lead']._id,
+              name: createdUsers['lead'].name,
+              email: createdUsers['lead'].email,
+            },
+            content: 'Investigating webhook worker cluster. CPU usage is currently normal.',
+          });
+        }
+        console.log(`Created sample ticket ${ticket.ticketNumber} (${ticket.subject})`);
       }
     }
 
-    console.log('Sample tickets and conversations created successfully.');
-  }
+    if (!workspace.ticketCounter || workspace.ticketCounter < 1008) {
+      workspace.ticketCounter = 1008;
+      await workspace.save();
+    }
+    console.log('Sample tickets checked/created successfully.');
 
   // Seed sample ticket queries (Agent <-> Lead) if empty
   const existingQueries = await TicketQuery.countDocuments({ workspaceId: workspace._id });

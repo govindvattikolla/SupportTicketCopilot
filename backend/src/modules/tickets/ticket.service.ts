@@ -135,12 +135,49 @@ export const createPublicTicket = async (
   return { ticket, trackingToken };
 };
 
+/**
+ * Find a ticket by tracking token or human-readable ticket number (e.g. TCK-1008).
+ * Supports:
+ * - 64-character unguessable cryptographic tracking token
+ * - Ticket number: "TCK-1008", "tck-1008" (case-insensitive)
+ * - Bare numeric ID: "1008" (auto-prefixed with TCK-)
+ */
+export const findTicketByTokenOrNumber = async (
+  tokenOrNumber: string
+): Promise<ITicket | null> => {
+  const trimmed = tokenOrNumber ? tokenOrNumber.trim() : '';
+  if (!trimmed) return null;
+
+  // 1. Direct trackingToken lookup (64-character cryptographic hex string)
+  let ticket = await Ticket.findOne({ trackingToken: trimmed });
+  if (ticket) return ticket;
+
+  // 2. Exact or case-insensitive ticket number lookup (e.g. "TCK-1008")
+  const upper = trimmed.toUpperCase();
+  ticket = await Ticket.findOne({ ticketNumber: upper });
+  if (ticket) return ticket;
+
+  // 3. Bare numeric digits (e.g. "1008" -> "TCK-1008")
+  if (/^\d+$/.test(trimmed)) {
+    ticket = await Ticket.findOne({ ticketNumber: `TCK-${trimmed}` });
+    if (ticket) return ticket;
+  }
+
+  // 4. Case-insensitive regex fallback for flexible ticket number formatting
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  ticket = await Ticket.findOne({
+    ticketNumber: { $regex: new RegExp(`^${escaped}$`, 'i') },
+  }).sort({ createdAt: -1 });
+
+  return ticket;
+};
+
 export const getTicketByTrackingToken = async (
-  trackingToken: string
+  tokenOrNumber: string
 ): Promise<{ ticket: ITicket; messages: IMessage[] }> => {
-  const ticket = await Ticket.findOne({ trackingToken });
+  const ticket = await findTicketByTokenOrNumber(tokenOrNumber);
   if (!ticket) {
-    throw new NotFoundError('Invalid tracking token or ticket does not exist');
+    throw new NotFoundError('Invalid tracking reference or ticket does not exist');
   }
 
   // Strictly filter only public customer replies (internal notes are completely excluded)
@@ -155,12 +192,12 @@ export const getTicketByTrackingToken = async (
 };
 
 export const addCustomerReply = async (
-  trackingToken: string,
+  tokenOrNumber: string,
   content: string
 ): Promise<{ message: IMessage; ticket: ITicket }> => {
-  const ticket = await Ticket.findOne({ trackingToken });
+  const ticket = await findTicketByTokenOrNumber(tokenOrNumber);
   if (!ticket) {
-    throw new NotFoundError('Invalid tracking token or ticket does not exist');
+    throw new NotFoundError('Invalid tracking reference or ticket does not exist');
   }
 
   if (ticket.status === 'closed') {
@@ -393,13 +430,23 @@ export const getWorkspaceTicketDetails = async (
   auditEvents: IAuditEvent[];
   slaEvaluation: SLAEvaluationResult;
 }> => {
-  if (!Types.ObjectId.isValid(ticketId)) {
+  const trimmed = ticketId ? ticketId.trim() : '';
+  if (!trimmed) {
     throw new BadRequestError('Invalid ticket identifier');
+  }
+
+  let query: any;
+  if (Types.ObjectId.isValid(trimmed)) {
+    query = { _id: trimmed, workspaceId };
+  } else {
+    const upper = trimmed.toUpperCase();
+    const formattedNumber = /^\d+$/.test(trimmed) ? `TCK-${trimmed}` : upper;
+    query = { ticketNumber: formattedNumber, workspaceId };
   }
 
   // Strictly enforce workspace isolation
   const [ticket, workspace] = await Promise.all([
-    Ticket.findOne({ _id: ticketId, workspaceId }).populate('assignedTo', '_id name email role'),
+    Ticket.findOne(query).populate('assignedTo', '_id name email role'),
     Workspace.findById(workspaceId),
   ]);
 

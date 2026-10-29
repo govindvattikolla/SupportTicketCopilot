@@ -54,15 +54,20 @@ function HelpCenterHome() {
     e.preventDefault();
     const cleaned = tokenInput.trim();
     if (!cleaned) {
-      setInputError('Please enter your tracking token to look up your ticket.');
+      setInputError('Please enter your ticket ID (e.g. TCK-1008) or tracking token.');
       return;
     }
 
-    // If the customer pasted a full URL like http://.../track/:token, extract just the token
-    const tokenMatch = cleaned.match(/track\/([a-f0-9]+)/i);
-    const token = tokenMatch ? tokenMatch[1] : cleaned;
+    // If the customer pasted a full URL like http://.../track/:identifier, extract just the identifier
+    const tokenMatch = cleaned.match(/track\/([a-zA-Z0-9_-]+)/i);
+    let identifier = tokenMatch ? tokenMatch[1] : cleaned;
 
-    navigate(`/track/${token}`);
+    // If only numeric digits are entered (e.g. 1008), format as TCK-1008
+    if (/^\d+$/.test(identifier)) {
+      identifier = `TCK-${identifier}`;
+    }
+
+    navigate(`/track/${identifier}`);
   };
 
   return (
@@ -79,7 +84,7 @@ function HelpCenterHome() {
             How can our support team assist you?
           </h1>
           <p className="text-slate-300 text-sm sm:text-base leading-relaxed mb-8 max-w-2xl mx-auto">
-            Submit a support ticket for technical assistance, billing questions, or bug reports. If you already submitted a request, track its real-time status below.
+            Submit a support ticket for technical assistance, billing questions, or bug reports. If you already submitted a request, track its real-time status below using your ticket ID (e.g. TCK-1008).
           </p>
 
           {/* Direct Ticket Lookup Bar */}
@@ -93,7 +98,7 @@ function HelpCenterHome() {
                   setTokenInput(e.target.value);
                   setInputError(null);
                 }}
-                placeholder="Enter your secure tracking token (e.g. 64-character token)..."
+                placeholder="Enter your ticket ID (e.g. TCK-1008) or tracking token..."
                 className="w-full pl-11 pr-28 py-3.5 rounded-2xl bg-slate-900/90 border border-slate-700 text-slate-100 placeholder-slate-500 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition shadow-inner"
               />
               <button
@@ -108,9 +113,22 @@ function HelpCenterHome() {
             )}
           </form>
 
-          <p className="text-xs text-slate-400">
-            Received a link after submitting? You can also click the link directly in your browser.
-          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-400 mt-2">
+            <span>Example:</span>
+            <button
+              type="button"
+              onClick={() => {
+                setTokenInput('TCK-1008');
+                navigate('/track/TCK-1008');
+              }}
+              className="px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-brand-300 font-mono text-[11px] font-semibold border border-slate-700/80 transition"
+              title="Click to track sample ticket TCK-1008"
+            >
+              TCK-1008
+            </button>
+            <span className="text-slate-600">•</span>
+            <span>You can also enter your 64-character token or paste your tracking link directly.</span>
+          </div>
         </div>
       </div>
 

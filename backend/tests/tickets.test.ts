@@ -112,9 +112,44 @@ describe('Phase 2 - Complete Ticket Lifecycle & Security Suite', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.ticket.ticketNumber).toBe(createdTicketNumber);
+    expect(res.body.data.ticket.trackingToken).toBe(createdTrackingToken);
     expect(res.body.data.ticket.status).toBe('open');
     expect(res.body.data.ticket.priority).toBe('P2');
     expect(res.body.data.messages).toHaveLength(0);
+  });
+
+  it('2a. Customer can track ticket directly using ticket number (e.g. TCK-1001)', async () => {
+    const res = await request(app).get(`/api/public/tickets/track/${createdTicketNumber}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.ticket.ticketNumber).toBe(createdTicketNumber);
+    expect(res.body.data.ticket.trackingToken).toBe(createdTrackingToken);
+    expect(res.body.data.ticket.status).toBe('open');
+  });
+
+  it('2b. Customer can track ticket using lowercase ticket number (e.g. tck-1001)', async () => {
+    const res = await request(app).get(`/api/public/tickets/track/${createdTicketNumber.toLowerCase()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.ticket.ticketNumber).toBe(createdTicketNumber);
+  });
+
+  it('2c. Customer can track ticket using bare numeric ID (e.g. 1001)', async () => {
+    const bareNumber = createdTicketNumber.replace('TCK-', '');
+    const res = await request(app).get(`/api/public/tickets/track/${bareNumber}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.ticket.ticketNumber).toBe(createdTicketNumber);
+  });
+
+  it('2d. Tracking non-existent ticket number returns 404', async () => {
+    const res = await request(app).get('/api/public/tickets/track/TCK-9999');
+
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
   });
 
   it('3. Staff can add both public replies and private internal notes', async () => {
@@ -169,6 +204,16 @@ describe('Phase 2 - Complete Ticket Lifecycle & Security Suite', () => {
     expect(res.body.data.auditEvents.length).toBeGreaterThanOrEqual(3);
   });
 
+  it('5a. Staff can retrieve ticket details using ticket number (e.g. TCK-1001)', async () => {
+    const res = await request(app)
+      .get(`/api/tickets/${createdTicketNumber}`)
+      .set('Authorization', `Bearer ${tokenA}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.ticket.ticketNumber).toBe(createdTicketNumber);
+    expect(res.body.data.ticket._id).toBe(ticketId);
+  });
+
   it('6. Staff can filter, search, and paginate tickets', async () => {
     const res = await request(app)
       .get('/api/tickets?status=open&search=password')
@@ -220,6 +265,16 @@ describe('Phase 2 - Complete Ticket Lifecycle & Security Suite', () => {
     // Verify ticket status transitioned back to open
     const ticketDoc = await Ticket.findById(ticketId);
     expect(ticketDoc?.status).toBe('open');
+  });
+
+  it('8a. Customer can post follow-up reply using ticket number (e.g. TCK-1001)', async () => {
+    const res = await request(app)
+      .post(`/api/public/tickets/track/${createdTicketNumber}/messages`)
+      .send({ content: 'Follow-up posted using TCK-1001 ticket reference.' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.content).toBe('Follow-up posted using TCK-1001 ticket reference.');
   });
 
   it('9. Staff can assign and reassign tickets', async () => {

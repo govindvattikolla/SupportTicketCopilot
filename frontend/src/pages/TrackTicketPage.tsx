@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   trackPublicTicketApi, 
@@ -15,14 +15,20 @@ import {
   Headphones, 
   AlertCircle, 
   ArrowLeft, 
-  RotateCcw 
+  RotateCcw,
+  Search,
+  Copy,
+  Check
 } from 'lucide-react';
 
 export const TrackTicketPage: React.FC = () => {
   const { token } = useParams<{ token: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [replyContent, setReplyContent] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [retryInput, setRetryInput] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const { data, isLoading, isError, error } = useQuery<{ ticket: Ticket; messages: Message[] }>({
     queryKey: ['trackTicket', token],
@@ -49,11 +55,17 @@ export const TrackTicketPage: React.FC = () => {
     sendMutation.mutate(replyContent);
   };
 
+  const handleCopyReference = (refText: string) => {
+    navigator.clipboard.writeText(refText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   if (isLoading) {
     return (
       <div className="max-w-4xl mx-auto px-6 py-20 text-center">
         <div className="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-        <p className="text-slate-400 text-sm">Retrieving secure ticket details...</p>
+        <p className="text-slate-400 text-sm">Retrieving ticket details for {token}...</p>
       </div>
     );
   }
@@ -64,17 +76,61 @@ export const TrackTicketPage: React.FC = () => {
         <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto mb-4">
           <AlertCircle className="w-8 h-8" />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-2">Invalid Tracking Reference</h2>
+        <h2 className="text-2xl font-bold text-white mb-2">Ticket Not Found</h2>
         <p className="text-slate-400 text-sm mb-6">
-          {error instanceof Error ? error.message : 'We could not locate a ticket with this secure tracking token.'}
+          {error instanceof Error
+            ? error.message
+            : `We could not locate a ticket with reference "${token}". Please verify your ticket ID (e.g. TCK-1008) or tracking token.`}
         </p>
-        <Link
-          to="/support"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition"
+
+        {/* Quick retry input */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const val = retryInput.trim();
+            if (val) {
+              const matched = val.match(/track\/([a-zA-Z0-9_-]+)/i);
+              let id = matched ? matched[1] : val;
+              if (/^\d+$/.test(id)) id = `TCK-${id}`;
+              navigate(`/track/${id}`);
+            }
+          }}
+          className="max-w-md mx-auto mb-8 flex gap-2"
         >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Submit a New Support Ticket</span>
-        </Link>
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              value={retryInput}
+              onChange={(e) => setRetryInput(e.target.value)}
+              placeholder="Enter ticket ID (e.g. TCK-1008)..."
+              className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 placeholder-slate-500 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition"
+            />
+          </div>
+          <button
+            type="submit"
+            className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-medium transition shrink-0 shadow-sm"
+          >
+            Track
+          </button>
+        </form>
+
+        <div className="flex items-center justify-center gap-4 text-xs">
+          <Link
+            to="/"
+            className="text-slate-400 hover:text-white transition"
+          >
+            Help Center Home
+          </Link>
+          <span className="text-slate-700">•</span>
+          <Link
+            to="/support"
+            className="inline-flex items-center gap-1.5 text-brand-400 hover:text-brand-300 font-medium transition"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Submit a New Support Ticket</span>
+          </Link>
+        </div>
       </div>
     );
   }
@@ -100,10 +156,29 @@ export const TrackTicketPage: React.FC = () => {
       <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 sm:p-8 backdrop-blur shadow-xl mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-700/60">
           <div>
-            <div className="flex items-center gap-2.5 mb-2">
-              <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-900 text-brand-400 border border-slate-700">
-                {ticket.ticketNumber}
-              </span>
+            <div className="flex flex-wrap items-center gap-2.5 mb-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 shadow-inner">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Ticket ID:</span>
+                <span className="font-mono text-xs font-bold text-brand-400">
+                  {ticket.ticketNumber}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleCopyReference(ticket.ticketNumber)}
+                  title="Copy Ticket ID to clipboard"
+                  className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-white transition pl-1.5 border-l border-slate-800"
+                >
+                  {copied ? (
+                    <span className="text-emerald-400 font-medium flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Copied
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1">
+                      <Copy className="w-3 h-3" /> Copy
+                    </span>
+                  )}
+                </button>
+              </div>
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
               <CategoryBadge category={ticket.category} />

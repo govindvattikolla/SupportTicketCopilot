@@ -140,6 +140,7 @@ const TicketSchema = new Schema<ITicket>(
 
 // Compound indexes for optimal tenant-scoped queries
 TicketSchema.index({ workspaceId: 1, ticketNumber: 1 }, { unique: true });
+TicketSchema.index({ ticketNumber: 1 });
 TicketSchema.index({ workspaceId: 1, status: 1 });
 TicketSchema.index({ workspaceId: 1, priority: 1 });
 TicketSchema.index({ workspaceId: 1, assignedTo: 1 });

@@ -49,6 +49,7 @@ export const trackPublicTicket = async (req: Request, res: Response): Promise<Re
     ticket: {
       _id: ticket._id,
       ticketNumber: ticket.ticketNumber,
+      trackingToken: ticket.trackingToken,
       subject: ticket.subject,
       description: ticket.description,
       category: ticket.category,
@@ -67,6 +68,6 @@ export const submitCustomerMessage = async (req: Request, res: Response): Promis
   const { token } = req.params;
   const { content } = addMessageSchema.parse(req.body);
 
-  const message = await addCustomerMessage(token, content);
+  const { message } = await addCustomerMessage(token, content);
   return sendSuccess(res, message, 'Reply sent successfully', 201);
 };
