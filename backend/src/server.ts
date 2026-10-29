@@ -66,6 +66,15 @@ const startServer = async (): Promise<void> => {
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  process.on('unhandledRejection', (reason: any) => {
+    console.error('[Server] Unhandled Promise Rejection:', reason);
+  });
+
+  process.on('uncaughtException', (error: Error) => {
+    console.error('[Server] Uncaught Exception:', error);
+    process.exit(1);
+  });
 };
 
 startServer().catch((error) => {

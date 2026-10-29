@@ -127,6 +127,18 @@ export interface AuditEvent {
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
+let isRefreshing = false;
+let refreshSubscribers: Array<(err?: Error) => void> = [];
+
+const subscribeTokenRefresh = (cb: (err?: Error) => void) => {
+  refreshSubscribers.push(cb);
+};
+
+const onRefreshed = (err?: Error) => {
+  refreshSubscribers.forEach((cb) => cb(err));
+  refreshSubscribers = [];
+};
+
 export async function apiClient<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
@@ -135,17 +147,59 @@ export async function apiClient<T>(endpoint: string, options?: RequestInit): Pro
     headers.set('Content-Type', 'application/json');
   }
 
-  // Include Bearer token from localStorage if present
-  const token = localStorage.getItem('supportflow_token');
-  if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
+  // Pure HTTP-only cookie authentication via credentials: 'include'.
+  // No sensitive JWTs or secrets are stored in or read from localStorage.
   const response = await fetch(url, {
     ...options,
     headers,
     credentials: 'include',
   });
+
+  // Check if access token expired (401) and request is not an auth lifecycle endpoint
+  const isAuthRoute =
+    endpoint.includes('/api/auth/login') ||
+    endpoint.includes('/api/auth/refresh') ||
+    endpoint.includes('/api/auth/logout');
+
+  if (response.status === 401 && !isAuthRoute) {
+    if (!isRefreshing) {
+      isRefreshing = true;
+      try {
+        await refreshTokenApi();
+        isRefreshing = false;
+        onRefreshed();
+      } catch (refreshErr) {
+        isRefreshing = false;
+        onRefreshed(refreshErr as Error);
+        const body = (await response.json().catch(() => ({}))) as ApiResponse<T>;
+        const msg = body.error?.message || 'Session expired. Please log in again.';
+        throw new Error(msg);
+      }
+    } else {
+      // Queue concurrent requests while token is refreshing
+      await new Promise<void>((resolve, reject) => {
+        subscribeTokenRefresh((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    }
+
+    // Retry original request with refreshed HTTP-only cookie session
+    const retryResponse = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'include',
+    });
+
+    const retryBody = (await retryResponse.json()) as ApiResponse<T>;
+    if (!retryResponse.ok || !retryBody.success) {
+      const errorMsg =
+        retryBody.error?.message || `Request failed with status ${retryResponse.status}`;
+      throw new Error(errorMsg);
+    }
+    return retryBody.data;
+  }
 
   const body = (await response.json()) as ApiResponse<T>;
 
@@ -208,7 +262,8 @@ export const submitCustomerMessageApi = async (
 // Staff Auth APIs
 export interface LoginResult {
   user: User;
-  token: string;
+  token?: string;
+  accessToken?: string;
 }
 
 export const loginApi = async (
@@ -219,6 +274,12 @@ export const loginApi = async (
   return apiClient<LoginResult>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password, workspaceSlug }),
+  });
+};
+
+export const refreshTokenApi = async (): Promise<{ user: User }> => {
+  return apiClient<{ user: User }>('/api/auth/refresh', {
+    method: 'POST',
   });
 };
 

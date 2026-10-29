@@ -13,6 +13,7 @@
     "dev:frontend": "npm run dev --workspace=frontend",
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
     "test": "npm run test --workspace=backend",
+    "test:e2e": "playwright test",
     "seed": "npm run seed --workspace=backend",
     "typecheck": "npm run typecheck --workspace=backend && npm run typecheck --workspace=frontend",
     "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend"
@@ -26,6 +27,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "concurrently": "^9.2.5"
   }
 }

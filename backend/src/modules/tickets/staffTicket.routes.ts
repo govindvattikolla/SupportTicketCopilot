@@ -7,6 +7,10 @@ import {
   assignAgent,
   postMessage,
 } from './staffTicket.controller';
+import {
+  downloadStaffAttachment,
+  uploadStaffAttachment,
+} from '../attachments/attachment.controller';
 import { authenticate } from '../../middleware/auth';
 import { asyncHandler } from '../../shared/utils/asyncHandler';
 
@@ -21,5 +25,9 @@ router.patch('/:id/status', asyncHandler(changeStatus));
 router.patch('/:id/priority', asyncHandler(changePriority));
 router.patch('/:id/assign', asyncHandler(assignAgent));
 router.post('/:id/messages', asyncHandler(postMessage));
+
+// Workspace-scoped staff attachment endpoints
+router.get('/:id/attachments/:attachmentId', asyncHandler(downloadStaffAttachment));
+router.post('/:id/attachments', asyncHandler(uploadStaffAttachment));
 
 export const staffTicketRoutes = router;

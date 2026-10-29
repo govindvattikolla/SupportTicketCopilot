@@ -5,6 +5,10 @@ import {
   trackPublicTicket,
   submitCustomerMessage,
 } from './publicTicket.controller';
+import {
+  downloadPublicAttachment,
+  uploadPublicAttachment,
+} from '../attachments/attachment.controller';
 import { asyncHandler } from '../../shared/utils/asyncHandler';
 
 const router = Router();
@@ -30,5 +34,9 @@ router.use(publicRateLimiter);
 router.post('/', asyncHandler(submitPublicTicket));
 router.get('/track/:token', asyncHandler(trackPublicTicket));
 router.post('/track/:token/messages', asyncHandler(submitCustomerMessage));
+
+// Public Attachment APIs (restricted to matching tracking token/ticket ID)
+router.get('/track/:token/attachments/:attachmentId', asyncHandler(downloadPublicAttachment));
+router.post('/track/:token/attachments', asyncHandler(uploadPublicAttachment));
 
 export const publicTicketRoutes = router;

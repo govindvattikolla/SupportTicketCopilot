@@ -3,7 +3,9 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
 import { env } from './config/env';
+import { logger } from './config/logger';
 import { healthRoutes } from './modules/health/health.routes';
 import { authRoutes } from './modules/auth/auth.routes';
 import { publicTicketRoutes } from './modules/tickets/publicTicket.routes';
@@ -42,8 +44,28 @@ export const createApp = (): Application => {
 
   // HTTP request logging (suppressed during automated tests)
   if (env.NODE_ENV !== 'test') {
-    app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+    app.use(
+      morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev', {
+        stream: logger.morganStream,
+      })
+    );
   }
+
+  // Global rate limiter for API routes (1000 requests per 15 min per IP)
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 1000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      success: false,
+      error: {
+        message: 'Too many API requests, please try again later.',
+        code: 'RATE_LIMIT_EXCEEDED',
+      },
+    },
+  });
+  app.use('/api', apiLimiter);
 
   // API Routes
   app.use('/api/health', healthRoutes);

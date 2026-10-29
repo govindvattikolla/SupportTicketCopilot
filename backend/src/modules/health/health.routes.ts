@@ -1,9 +1,15 @@
 import { Router } from 'express';
-import { getHealth } from './health.controller';
+import { getHealth, getLiveness, getReadiness } from './health.controller';
 
 const router = Router();
 
-// GET /api/health - Public health check
+// Full system health diagnostics
 router.get('/', getHealth);
+
+// Container orchestrator liveness probe (K8s livenessProbe)
+router.get('/live', getLiveness);
+
+// Container orchestrator readiness probe (K8s readinessProbe)
+router.get('/ready', getReadiness);
 
 export const healthRoutes = router;

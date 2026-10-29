@@ -4,18 +4,17 @@ let socket: Socket | null = null;
 
 export const getSocket = (): Socket => {
   if (!socket) {
-    const token = localStorage.getItem('supportflow_token') || localStorage.getItem('token');
-    // Connect to same origin (Vite proxy forwards websocket traffic to backend on port 5000)
+    // Connect with credentials so HTTP-only authentication cookies are sent in handshake
     socket = io('/', {
-      auth: { token },
-      autoConnect: !!token,
+      withCredentials: true,
+      autoConnect: true,
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
     });
 
     socket.on('connect', () => {
-      // Socket connected
+      // Socket connected with HTTP-only cookie authentication
     });
 
     socket.on('connect_error', (err) => {
@@ -25,14 +24,14 @@ export const getSocket = (): Socket => {
   return socket;
 };
 
-export const updateSocketAuth = (token: string | null): void => {
+export const updateSocketAuth = (authenticated: boolean | string | null): void => {
+  const isAuth = !!authenticated;
   if (!socket) {
-    if (token) getSocket();
+    if (isAuth) getSocket();
     return;
   }
 
-  socket.auth = { token };
-  if (token) {
+  if (isAuth) {
     if (!socket.connected) {
       socket.connect();
     }

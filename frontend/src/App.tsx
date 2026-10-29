@@ -84,7 +84,7 @@ function HelpCenterHome() {
             How can our support team assist you?
           </h1>
           <p className="text-slate-300 text-sm sm:text-base leading-relaxed mb-8 max-w-2xl mx-auto">
-            Submit a support ticket for technical assistance, billing questions, or bug reports. If you already submitted a request, track its real-time status below using your ticket ID (e.g. TCK-1008).
+            Submit a support ticket for technical assistance, billing questions, or bug reports And Tracking using your ticket ID (e.g. TCK-1008).
           </p>
 
           {/* Direct Ticket Lookup Bar */}

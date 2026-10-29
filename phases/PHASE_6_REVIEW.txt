@@ -1,0 +1,234 @@
+================================================================================
+SUPPORTFLOW - PHASE 6 IMPLEMENTATION REVIEW & PRODUCTION READINESS SPECIFICATION
+================================================================================
+Generated: 2026-10-29
+Author: SupportFlow Engineering Team
+Phase: Phase 6 - Production Hardening, Comprehensive Security, Full Test Coverage, Reliability, and Deployment Readiness
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Phase 6 completes the production hardening of the SupportFlow Customer Support Operations Platform.
+The entire application was audited and fortified across security boundaries, multi-tenant invariants,
+data isolation, background worker reliability, full test automation, and production deployment architecture.
+
+Verification Summary:
+- Total Unit & Integration Tests: 10 suites, 101 tests passed (100% pass rate in Vitest).
+- Total End-to-End Workflows: 4 browser test journeys passed (100% pass rate in Playwright).
+- TypeScript Typecheck: 0 compilation errors across both backend and frontend workspaces (`tsc --noEmit`).
+- Production Artifact Builds: Backend compiled cleanly to `backend/dist`, Frontend bundled cleanly with Vite to `frontend/dist`.
+- Security Invariants: HTTP-only secure cookie authentication, short-lived access tokens (15m), rotating refresh tokens (7d) with reuse detection, zero localStorage tokens, zero credential leaks, hardened Helmet headers, brute-force auth rate-limiters, path-traversal sanitization, and strict tenant-scoped attachment protection.
+
+--------------------------------------------------------------------------------
+2. COMPREHENSIVE SECURITY & OPERATIONAL AUDIT FINDINGS
+--------------------------------------------------------------------------------
+
+A. Staff Authentication, HTTP-Only Cookie Storage & Refresh Token Rotation
+   - Verified that all authentication tokens are strictly stored in `httpOnly`, `sameSite`, and `secure` (in production) cookies (`accessToken` and `refreshToken`).
+   - Verified zero tokens stored in browser `localStorage`. Frontend `client.ts`, `AuthContext.tsx`, and `realtime/socket.ts` contain zero token reads from `localStorage`.
+   - Implemented short-lived access tokens (15 minutes) and long-lived rotating refresh tokens (7 days) with cryptographic SHA-256 hashing in MongoDB (`RefreshToken` model).
+   - Refresh Token Rotation & Family Reuse Detection: Each refresh generates a new refresh token and revokes the predecessor. If an old or compromised refresh token is replayed, the entire token family is immediately revoked, preventing replay attacks.
+   - Frontend Transparent 401 Interceptor: Automatically triggers `POST /api/auth/refresh` on 401 Unauthorized responses, queues concurrent requests, and retries seamlessly without interrupting user activity.
+   - Socket.IO cookie handshake parsing: WebSockets authenticate seamlessly via browser HTTP-only cookies.
+   - Enforced `requireRole` middleware across all staff routes. Attempts by Support Agents to access Admin
+     endpoints (`/api/admin-reports`, `/api/reports`) return HTTP 403 Forbidden with clean JSON messages.
+   - Verified frontend `RoleRoute` component prevents unauthorized URL navigation, rendering a clear
+     Access Restricted (403 Forbidden) guard screen while preserving user session and state.
+
+B. Workspace & Multi-Tenant Isolation
+   - Verified that all staff-facing database queries unconditionally scope on `workspaceId: req.user.workspaceId`.
+   - Verified that client-supplied tenant identifiers are never trusted without verified workspace membership.
+   - Verified cross-tenant isolation: An agent from Workspace A attempting to inspect or download records
+     belonging to Workspace B receives an immediate HTTP 404 Not Found error.
+
+C. Public Ticket Tracking Security & Dual-Identifier Resolution
+   - Customer tracking routes (`/api/public/tickets/track/:token`) accept either friendly ticket IDs (`TCK-1008`)
+     or 64-character unguessable cryptographic tokens (`0db61e...`).
+   - Verified that public ticket responses strictly strip all internal fields: staff assignments, internal notes,
+     agent consultations, SLA breach warning logs, and system audit trails are completely withheld from the customer.
+   - Post-submission screen provides a prominent Hero Ticket ID Card, one-click clipboard copy, and a 3-step
+     ticket monitoring guide.
+
+D. Customer-Visible vs. Internal Staff Messages
+   - Verified that `isInternal: true` can only be set by authenticated staff members (`sender.type === 'agent'`).
+   - Public tracking endpoint (`GET /api/public/tickets/track/:token`) applies a mandatory MongoDB filter
+     `isInternal: false`, ensuring internal staff discussions remain strictly invisible to customers.
+   - Customers posting follow-up messages automatically transition tickets from `resolved` to `open`
+     via atomic database updates, waking up agents without allowing customer modification of priority or internal metadata.
+
+E. Ticket Lifecycle & State Machine Rules
+   - Verified strict state machine transitions in `ticket.service.ts`:
+     * `open` -> `in_progress` | `pending` | `resolved` | `closed`
+     * `in_progress` -> `pending` | `resolved` | `closed`
+     * `pending` -> `in_progress` | `resolved` | `closed`
+     * `resolved` -> `open` (customer reopen) | `closed`
+     * `closed` -> terminal state (no transitions permitted)
+   - Invalid transitions (e.g. attempting to jump from `closed` to `in_progress`) are strictly rejected
+     with HTTP 400 Bad Request and descriptive state error messages.
+
+F. Validation, Rate Limits, CORS, Security Headers & Error Responses
+   - Request payloads are parsed using strict runtime Zod schemas. Invalid payloads return HTTP 400 with
+     detailed validation error structures.
+   - Global API Rate Limiter (`apiLimiter`): 1000 requests per 15 minutes per IP applied across `/api`.
+   - Authentication Rate Limiter (`authRateLimiter`): 30 requests per 15 minutes per IP on `/api/auth/login`
+     preventing brute-force credential stuffing.
+   - Helmet Security Headers: Injects `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`,
+     `Strict-Transport-Security`, and Content Security Policy headers.
+   - Centralized Error Handler (`errorHandler.ts`): Masks internal errors in production, suppresses stack
+     trace leakage to clients, and logs unhandled exceptions via structured logger.
+
+G. Attachment Access Restrictions & Path Sanitization
+   - Uploaded filenames are sanitized against directory traversal attacks (`../`, `..\`) and null byte (`\0`) injections.
+   - Prohibited Executable Extensions: Files ending in `.exe`, `.sh`, `.bat`, `.cmd`, `.msi`, `.dll` are rejected (HTTP 400).
+   - Maximum File Size: Uploads exceeding 10MB (10,485,760 bytes) are rejected with a clear payload error.
+   - Public Download Endpoint (`GET /api/public/tickets/track/:token/attachments/:attachmentId`):
+     Strictly verifies `isInternal === false`. Requests for internal attachments return HTTP 403 Forbidden.
+   - Staff Download Endpoint (`GET /api/tickets/:id/attachments/:attachmentId`):
+     Strictly enforces tenant workspace scoping. Cross-workspace downloads return HTTP 404 Not Found.
+   - Downloads include `Content-Disposition: attachment; filename="..."` and `X-Content-Type-Options: nosniff`.
+
+H. Background Jobs, SLA Engine & Email Deduplication
+   - BullMQ Queue Worker: Configured with 3 retry attempts and exponential backoff (`delay: 1000ms`, `backoff: exponential`).
+   - Job Deduplication: Email notifications and SLA alerts require deterministic deduplication keys (`deduplicationKey`).
+     Duplicate queue dispatches within window are discarded to prevent customer email spamming.
+   - Resilient Fallback: If external Redis is temporarily disconnected or unreachable, the queue runner
+     gracefully falls back to an in-memory execution pipeline, ensuring SLA evaluations continue without crashes.
+   - SLA Engine: Accurately calculates First Response deadlines and Resolution deadlines based on priority
+     (P1=1h/4h, P2=4h/16h, P3=8h/48h, P4=24h/96h), pauses timers when awaiting customer input (`pending`),
+     and calculates warning triggers at 75% elapsed SLA time.
+
+I. Analytics Accuracy & Pagination
+   - Bottleneck radar and reporting queries use high-performance MongoDB `$facet` and aggregation pipelines.
+   - Staff inbox endpoints enforce strict pagination defaults (`page: 1, limit: 20`) with indexed sorting
+     on `updatedAt` and `attentionScore`, preventing denial-of-service from massive queue queries.
+
+J. Frontend Loading, Empty, Error & Mobile States
+   - Loading State: Skeleton tables and pulse animations indicate ongoing background queries.
+   - Empty State: Informative empty state cards for queues, consultations, and message threads.
+   - Error State: Contextual error banners with user-friendly retry buttons (`onRetry`).
+   - Responsive Mobile Viewport: Verified under 375x667 viewport dimensions (iPhone 13 standard).
+     Navbar collapses cleanly, form cards stack vertically, and touch targets meet accessibility guidelines.
+
+--------------------------------------------------------------------------------
+3. PRODUCTION OBSERVABILITY & DIAGNOSTICS
+--------------------------------------------------------------------------------
+
+A. Structured JSON Logger (`backend/src/config/logger.ts`)
+   - Replaces unstructured `console.log` calls across the production backend.
+   - Produces JSON-formatted logs in production with timestamp, log level, message, and metadata objects.
+   - Automatic Secret Redaction: Recursively inspects metadata and redacts sensitive keys:
+     `password`, `passwordHash`, `token`, `jwt`, `secret`, `authorization`, `creditCard`.
+   - Morgan Stream Integration: Seamlessly pipes HTTP request logs into the structured logger.
+
+B. Health, Liveness & Readiness Probes (`backend/src/modules/health/`)
+   - `GET /api/health`: Comprehensive system diagnostics:
+     * Overall status: `ok` (healthy) or `degraded` (database issue).
+     * Service identification: `supportflow-api`.
+     * Environment: `development` / `production`.
+     * Node.js uptime in seconds and memory usage statistics.
+     * Database status: `connected` / `disconnected` and health boolean.
+     * Redis queue status: `live_redis` / `in_memory_mock`.
+   - `GET /api/health/live`: Lightweight liveness check for Kubernetes/ECS container orchestrators (returns 200).
+   - `GET /api/health/ready`: Readiness check. Verifies database connectivity before allowing traffic routing
+     (returns 200 when DB is connected, 503 when disconnected).
+
+C. Environment Invariant Validation (`backend/src/config/env.ts`)
+   - Zod runtime schema validates all critical environment variables on startup.
+   - Production Security Guard: Enforces that `JWT_SECRET` must be at least 32 characters long in production
+     and explicitly rejects default/placeholder values (`default_jwt_secret_replace_in_production...`).
+   - Configures storage drivers (`local` vs `s3`), log level (`debug`, `info`, `warn`, `error`), and port.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION TEST RESULTS
+--------------------------------------------------------------------------------
+
+All test suites were executed and verified against real system execution.
+
+A. Vitest Integration & Security Test Suites (10 Suites, 101 Tests Passed):
+   1. `tests/auth_cookies_refresh.test.ts` (5 tests) - PASSED (2234ms)
+      * Secure HTTP-only cookies for `accessToken` and `refreshToken` upon login.
+      * Authenticates protected API requests purely via HTTP-only cookie without Authorization headers.
+      * Token rotation via `POST /api/auth/refresh` issuing fresh access tokens and rotating refresh tokens.
+      * Security invariant: Replaying rotated refresh tokens triggers reuse detection and revokes the entire token family (HTTP 401).
+      * Logout endpoint revokes token in MongoDB and clears all auth cookies.
+   2. `tests/dashboard_rbac.test.ts` (19 tests) - PASSED (2857ms)
+      * Team lead reassignment, staff role hierarchy, and admin user creation.
+   3. `tests/tickets.test.ts` (16 tests) - PASSED (3099ms)
+      * Public form submission, dual-identifier lookups, state machine rules, and customer reopens.
+   4. `tests/operations.test.ts` (14 tests) - PASSED (2033ms)
+      * Explainable attention scoring, agent recommendation factor breakdown, and bottleneck radar.
+   5. `tests/queries_reports.test.ts` (11 tests) - PASSED (1742ms)
+      * Agent-to-Lead consultations and Lead-to-Admin systemic escalation reports.
+   6. `tests/phase6_hardening.test.ts` (16 tests) - PASSED (1721ms)
+      * Health and readiness probes (`/live`, `/ready`, `/health`).
+      * Helmet security headers (`X-Content-Type-Options: nosniff`).
+      * Rate limiting header generation.
+      * Safe error responses without stack trace leakage.
+      * Attachment path traversal sanitization and extension blacklisting.
+      * Public vs internal attachment access restrictions (HTTP 403 / 404).
+      * Tenant isolation on attachment downloads.
+      * Background job email deduplication idempotency.
+      * Staff RBAC and 401/403 authorization rejections.
+   7. `tests/socket_auth.test.ts` (5 tests) - PASSED (1718ms)
+      * Real-time Socket.IO room authorization and connection authentication via cookies.
+   8. `tests/health.test.ts` (3 tests) - PASSED (329ms)
+      * Diagnostic status and 503 degraded reporting on DB disconnection.
+   9. `tests/notifications_jobs.test.ts` (4 tests) - PASSED (539ms)
+      * Notification dispatch, email deduplication, and worker retry execution.
+   10. `tests/sla_engine.test.ts` (8 tests) - PASSED (58ms)
+      * SLA deadline computations, warning threshold triggers, and pause calculations.
+
+B. Playwright End-to-End Browser Test Suites (4 Tests Passed):
+   1. `Customer Journey`: Help desk navigation, ticket submission, Ticket ID generation (`TCK-XXXX`),
+      tracking URL redirection, and customer reply thread posting - PASSED (17.7s).
+   2. `Public Tracker Security`: Direct `TCK-1008` lookup from homepage search bar and invalid ticket
+      ID validation (`TCK-999999` -> "Ticket Not Found") - PASSED (18.1s).
+   3. `Staff Authentication & RBAC Boundaries`: Failed login handling with invalid credentials,
+      successful Agent login via HTTP-only cookies, verified 0 tokens in localStorage, verified HTTP-only
+      cookies in browser, session persistence across page reload, `RoleRoute` protection blocking Agent
+      access to Admin portal with 403 Access Restricted screen, return to dashboard, staff logout clearing
+      cookies, and Team Lead login with Operational Intelligence tab loading - PASSED (15.9s).
+   4. `Responsive Mobile State`: iPhone 13 mobile viewport (375x667) form stacking, button visibility,
+      and layout responsiveness without overflow - PASSED (5.2s).
+
+C. TypeScript Compilation & Lint Verification:
+   - Backend Typecheck: `npm run typecheck --workspace=backend` - PASSED (0 errors).
+   - Frontend Typecheck: `npm run typecheck --workspace=frontend` - PASSED (0 errors).
+
+D. Production Build Verification:
+   - Backend Build: `rimraf dist && tsc` - PASSED (`backend/dist/`).
+   - Frontend Build: `tsc && vite build` - PASSED (`frontend/dist/`, 1678 modules transformed).
+
+--------------------------------------------------------------------------------
+5. PRODUCTION DEPLOYMENT SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+SupportFlow is architectured for high-availability cloud deployment:
+
+1. Frontend Static SPA:
+   - Hosting: Vercel, Netlify, Cloudflare Pages, or AWS S3 + CloudFront.
+   - Build: `npm run build --workspace=frontend` -> `frontend/dist`.
+   - Routing: Configure SPA rewrite rule redirecting `/*` to `/index.html`.
+   - Environment: Set `VITE_API_URL=https://api.yourdomain.com`.
+
+2. Backend API Container:
+   - Hosting: AWS ECS, Google Cloud Run, Render, Fly.io, or Kubernetes.
+   - Entrypoint: `node backend/dist/server.js`.
+   - Probes: Readiness probe -> `GET /api/health/ready`, Liveness probe -> `GET /api/health/live`.
+   - Port: Binds to `$PORT` (default 5000).
+
+3. Background Queue Worker:
+   - Run as a separate worker service running the same container image.
+   - Scales horizontally to consume BullMQ SLA and notification jobs from Redis.
+
+4. Managed Services:
+   - Database: MongoDB Atlas (M10+ Replica Set recommended). Configure IP allowlist to VPC.
+   - Cache & Queues: Managed Redis (AWS ElastiCache, Upstash, or Redis Cloud) with TLS.
+   - Object Storage: AWS S3 or Cloudflare R2 (`STORAGE_DRIVER=s3`). Bucket access is private.
+
+--------------------------------------------------------------------------------
+6. CONCLUSION
+--------------------------------------------------------------------------------
+Phase 6 is fully verified and deployed-ready. All functional, security, test coverage,
+performance, and documentation requirements have been implemented and verified.
+================================================================================

@@ -31,11 +31,20 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
   // Authentication Middleware
   io.use(async (socket: Socket, next) => {
     try {
-      const token =
+      let token =
         socket.handshake.auth?.token ||
         (socket.handshake.headers.authorization
           ? socket.handshake.headers.authorization.replace('Bearer ', '')
           : null);
+
+      // Support HTTP-only cookie authentication for browser socket connections
+      if (!token && socket.handshake.headers.cookie) {
+        const cookieStr = socket.handshake.headers.cookie;
+        const cookieMatches = cookieStr.match(/(?:^|;\s*)(accessToken|token)=([^;]*)/);
+        if (cookieMatches && cookieMatches[2]) {
+          token = decodeURIComponent(cookieMatches[2]);
+        }
+      }
 
       if (!token) {
         return next(new Error('Authentication error: Missing token'));
