@@ -303,15 +303,6 @@ export async function apiClient<T>(endpoint: string, options?: RequestInit): Pro
     return retryBody.data;
   }
 
-    const retryBody = (await retryResponse.json()) as ApiResponse<T>;
-    if (!retryResponse.ok || !retryBody.success) {
-      const errorMsg =
-        retryBody.error?.message || `Request failed with status ${retryResponse.status}`;
-      throw new Error(errorMsg);
-    }
-    return retryBody.data;
-  }
-
   const body = (await response.json()) as ApiResponse<T>;
 
   if (!response.ok || !body.success) {
