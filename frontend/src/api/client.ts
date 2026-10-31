@@ -143,19 +143,23 @@ let inMemoryRefreshToken: string | null = null;
 export const setAuthToken = (token: string | null, refreshToken?: string | null): void => {
   inMemoryAuthToken = token;
   try {
-    if (typeof window !== 'undefined' && window.sessionStorage) {
+    if (typeof window !== 'undefined') {
       if (token) {
-        sessionStorage.setItem('supportflow_auth_token', token);
+        window.sessionStorage?.setItem('supportflow_auth_token', token);
+        window.localStorage?.setItem('supportflow_auth_token', token);
       } else {
-        sessionStorage.removeItem('supportflow_auth_token');
+        window.sessionStorage?.removeItem('supportflow_auth_token');
+        window.localStorage?.removeItem('supportflow_auth_token');
       }
 
       if (refreshToken !== undefined) {
         inMemoryRefreshToken = refreshToken;
         if (refreshToken) {
-          sessionStorage.setItem('supportflow_refresh_token', refreshToken);
+          window.sessionStorage?.setItem('supportflow_refresh_token', refreshToken);
+          window.localStorage?.setItem('supportflow_refresh_token', refreshToken);
         } else {
-          sessionStorage.removeItem('supportflow_refresh_token');
+          window.sessionStorage?.removeItem('supportflow_refresh_token');
+          window.localStorage?.removeItem('supportflow_refresh_token');
         }
       }
     }
@@ -165,9 +169,13 @@ export const setAuthToken = (token: string | null, refreshToken?: string | null)
 };
 
 export const getAuthToken = (): string | null => {
-  if (!inMemoryAuthToken && typeof window !== 'undefined' && window.sessionStorage) {
+  if (inMemoryAuthToken) return inMemoryAuthToken;
+  if (typeof window !== 'undefined') {
     try {
-      inMemoryAuthToken = sessionStorage.getItem('supportflow_auth_token');
+      inMemoryAuthToken =
+        window.sessionStorage?.getItem('supportflow_auth_token') ||
+        window.localStorage?.getItem('supportflow_auth_token') ||
+        null;
     } catch {
       inMemoryAuthToken = null;
     }
@@ -176,9 +184,13 @@ export const getAuthToken = (): string | null => {
 };
 
 export const getRefreshToken = (): string | null => {
-  if (!inMemoryRefreshToken && typeof window !== 'undefined' && window.sessionStorage) {
+  if (inMemoryRefreshToken) return inMemoryRefreshToken;
+  if (typeof window !== 'undefined') {
     try {
-      inMemoryRefreshToken = sessionStorage.getItem('supportflow_refresh_token');
+      inMemoryRefreshToken =
+        window.sessionStorage?.getItem('supportflow_refresh_token') ||
+        window.localStorage?.getItem('supportflow_refresh_token') ||
+        null;
     } catch {
       inMemoryRefreshToken = null;
     }
@@ -250,13 +262,11 @@ export async function apiClient<T>(endpoint: string, options?: RequestInit): Pro
         await refreshTokenApi();
         isRefreshing = false;
         onRefreshed();
-      } catch (refreshErr) {
+      } catch (refreshErr: any) {
         isRefreshing = false;
         setAuthToken(null, null);
         onRefreshed(refreshErr as Error);
-        const body = (await response.json().catch(() => ({}))) as ApiResponse<T>;
-        const msg = body.error?.message || 'Session expired. Please log in again.';
-        throw new Error(msg);
+        throw new Error(refreshErr?.message || 'Session expired. Please log in again.');
       }
     } else {
       // Queue concurrent requests while token is refreshing
