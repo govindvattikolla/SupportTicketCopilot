@@ -136,6 +136,56 @@ const getApiBaseUrl = (): string => {
 
 const API_BASE_URL = getApiBaseUrl();
 
+// Client-side session token management for seamless cross-domain deployments (e.g. Vercel -> Render)
+let inMemoryAuthToken: string | null = null;
+let inMemoryRefreshToken: string | null = null;
+
+export const setAuthToken = (token: string | null, refreshToken?: string | null): void => {
+  inMemoryAuthToken = token;
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      if (token) {
+        sessionStorage.setItem('supportflow_auth_token', token);
+      } else {
+        sessionStorage.removeItem('supportflow_auth_token');
+      }
+
+      if (refreshToken !== undefined) {
+        inMemoryRefreshToken = refreshToken;
+        if (refreshToken) {
+          sessionStorage.setItem('supportflow_refresh_token', refreshToken);
+        } else {
+          sessionStorage.removeItem('supportflow_refresh_token');
+        }
+      }
+    }
+  } catch {
+    // Graceful fallback for non-browser or storage-restricted environments
+  }
+};
+
+export const getAuthToken = (): string | null => {
+  if (!inMemoryAuthToken && typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      inMemoryAuthToken = sessionStorage.getItem('supportflow_auth_token');
+    } catch {
+      inMemoryAuthToken = null;
+    }
+  }
+  return inMemoryAuthToken;
+};
+
+export const getRefreshToken = (): string | null => {
+  if (!inMemoryRefreshToken && typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      inMemoryRefreshToken = sessionStorage.getItem('supportflow_refresh_token');
+    } catch {
+      inMemoryRefreshToken = null;
+    }
+  }
+  return inMemoryRefreshToken;
+};
+
 let isRefreshing = false;
 let refreshSubscribers: Array<(err?: Error) => void> = [];
 
@@ -174,8 +224,13 @@ export async function apiClient<T>(endpoint: string, options?: RequestInit): Pro
     headers.set('Content-Type', 'application/json');
   }
 
-  // Pure HTTP-only cookie authentication via credentials: 'include'.
-  // No sensitive JWTs or secrets are stored in or read from localStorage.
+  // Attach Bearer token for cross-domain requests where browsers partition or block third-party cookies
+  const activeToken = getAuthToken();
+  if (activeToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${activeToken}`);
+  }
+
+  // Credentials include allows cookies on same-origin (Nginx) and Bearer header works on cross-domain (Vercel+Render)
   const response = await fetch(url, {
     ...options,
     headers,
@@ -197,6 +252,7 @@ export async function apiClient<T>(endpoint: string, options?: RequestInit): Pro
         onRefreshed();
       } catch (refreshErr) {
         isRefreshing = false;
+        setAuthToken(null, null);
         onRefreshed(refreshErr as Error);
         const body = (await response.json().catch(() => ({}))) as ApiResponse<T>;
         const msg = body.error?.message || 'Session expired. Please log in again.';
@@ -212,12 +268,30 @@ export async function apiClient<T>(endpoint: string, options?: RequestInit): Pro
       });
     }
 
-    // Retry original request with refreshed HTTP-only cookie session
+    // Retry original request with refreshed Bearer token
+    const retryHeaders = new Headers(options?.headers);
+    if (!retryHeaders.has('Content-Type')) {
+      retryHeaders.set('Content-Type', 'application/json');
+    }
+    const freshToken = getAuthToken();
+    if (freshToken) {
+      retryHeaders.set('Authorization', `Bearer ${freshToken}`);
+    }
+
     const retryResponse = await fetch(url, {
       ...options,
-      headers,
+      headers: retryHeaders,
       credentials: 'include',
     });
+
+    const retryBody = (await retryResponse.json()) as ApiResponse<T>;
+    if (!retryResponse.ok || !retryBody.success) {
+      const errorMsg =
+        retryBody.error?.message || `Request failed with status ${retryResponse.status}`;
+      throw new Error(errorMsg);
+    }
+    return retryBody.data;
+  }
 
     const retryBody = (await retryResponse.json()) as ApiResponse<T>;
     if (!retryResponse.ok || !retryBody.success) {
@@ -291,6 +365,7 @@ export interface LoginResult {
   user: User;
   token?: string;
   accessToken?: string;
+  refreshToken?: string;
 }
 
 export const loginApi = async (
@@ -298,20 +373,48 @@ export const loginApi = async (
   password: string,
   workspaceSlug?: string
 ): Promise<LoginResult> => {
-  return apiClient<LoginResult>('/api/auth/login', {
+  const result = await apiClient<LoginResult>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password, workspaceSlug }),
   });
+  const token = result.accessToken || result.token || null;
+  setAuthToken(token, result.refreshToken || null);
+  return result;
 };
 
-export const refreshTokenApi = async (): Promise<{ user: User }> => {
-  return apiClient<{ user: User }>('/api/auth/refresh', {
+export const refreshTokenApi = async (): Promise<{
+  user: User;
+  accessToken?: string;
+  token?: string;
+  refreshToken?: string;
+}> => {
+  const storedRefreshToken = getRefreshToken();
+  const result = await apiClient<{
+    user: User;
+    accessToken?: string;
+    token?: string;
+    refreshToken?: string;
+  }>('/api/auth/refresh', {
     method: 'POST',
+    body: JSON.stringify({ refreshToken: storedRefreshToken }),
   });
+  const token = result.accessToken || result.token || null;
+  if (token) {
+    setAuthToken(token, result.refreshToken || storedRefreshToken);
+  }
+  return result;
 };
 
 export const logoutApi = async (): Promise<void> => {
-  await apiClient<null>('/api/auth/logout', { method: 'POST' });
+  const storedRefreshToken = getRefreshToken();
+  try {
+    await apiClient<null>('/api/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: storedRefreshToken }),
+    });
+  } finally {
+    setAuthToken(null, null);
+  }
 };
 
 export const getMeApi = async (): Promise<{ user: User; workspace: any }> => {

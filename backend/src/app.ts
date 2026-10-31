@@ -24,6 +24,9 @@ import { NotFoundError } from './shared/errors/AppError';
 export const createApp = (): Application => {
   const app = express();
 
+  // Trust first proxy hop (essential for Render, AWS, Heroku, Cloudflare reverse proxies)
+  app.set('trust proxy', 1);
+
   // Security headers
   app.use(helmet());
 

@@ -1,20 +1,33 @@
 import { io, Socket } from 'socket.io-client';
+import { getAuthToken } from '../api/client';
 
 let socket: Socket | null = null;
 
+const getSocketBaseUrl = (): string => {
+  const envVal = (import.meta.env.VITE_API_URL || '').trim();
+  if (!envVal || envVal === '/') {
+    return '';
+  }
+  return envVal.replace(/\/+$/, '');
+};
+
 export const getSocket = (): Socket => {
   if (!socket) {
-    // Connect with credentials so HTTP-only authentication cookies are sent in handshake
-    socket = io('/', {
+    const baseUrl = getSocketBaseUrl();
+    const token = getAuthToken();
+
+    // Connect with auth token and credentials for cross-domain and same-domain support
+    socket = io(baseUrl || '/', {
       withCredentials: true,
       autoConnect: true,
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
+      auth: { token },
     });
 
     socket.on('connect', () => {
-      // Socket connected with HTTP-only cookie authentication
+      // Socket connected with token authentication
     });
 
     socket.on('connect_error', (err) => {
@@ -26,10 +39,15 @@ export const getSocket = (): Socket => {
 
 export const updateSocketAuth = (authenticated: boolean | string | null): void => {
   const isAuth = !!authenticated;
+  const token = getAuthToken();
+
   if (!socket) {
     if (isAuth) getSocket();
     return;
   }
+
+  // Update credentials for active/reconnecting socket session
+  socket.auth = { token };
 
   if (isAuth) {
     if (!socket.connected) {

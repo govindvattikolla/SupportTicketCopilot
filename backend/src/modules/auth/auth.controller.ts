@@ -72,7 +72,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
 
   return sendSuccess(
     res,
-    { user, accessToken, token }, // token provided for API/Supertest clients
+    { user, accessToken, token, refreshToken }, // token and refreshToken provided for cross-domain / API clients
     'Login successful'
   );
 };
@@ -96,7 +96,7 @@ export const refresh = async (req: Request, res: Response): Promise<Response> =>
 
   return sendSuccess(
     res,
-    { user, accessToken, token: accessToken },
+    { user, accessToken, token: accessToken, refreshToken },
     'Session refreshed successfully'
   );
 };
