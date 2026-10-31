@@ -125,7 +125,16 @@ export interface AuditEvent {
   createdAt: string;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+// Safe API Base URL resolver: Handles '/', ' /', '', '/api', or full URLs cleanly
+const getApiBaseUrl = (): string => {
+  const envVal = (import.meta.env.VITE_API_URL || '').trim();
+  if (!envVal || envVal === '/') {
+    return '';
+  }
+  return envVal.replace(/\/+$/, '');
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 let isRefreshing = false;
 let refreshSubscribers: Array<(err?: Error) => void> = [];
@@ -140,7 +149,25 @@ const onRefreshed = (err?: Error) => {
 };
 
 export async function apiClient<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  // Build clean URL without double-slashes or duplicate /api prefixes
+  let url: string;
+  if (API_BASE_URL.endsWith('/api') && cleanEndpoint.startsWith('/api/')) {
+    url = `${API_BASE_URL.slice(0, -4)}${cleanEndpoint}`;
+  } else if (API_BASE_URL) {
+    url = `${API_BASE_URL}${cleanEndpoint}`;
+  } else {
+    url = cleanEndpoint;
+  }
+
+  // Guard against any leading double-slashes '//' or duplicate '/api/api/'
+  if (url.startsWith('//')) {
+    url = url.replace(/^\/+/, '/');
+  }
+  if (url.startsWith('/api/api/')) {
+    url = url.replace(/^\/api\/api\//, '/api/');
+  }
 
   const headers = new Headers(options?.headers);
   if (!headers.has('Content-Type')) {

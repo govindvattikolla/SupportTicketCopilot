@@ -67,9 +67,31 @@ export const createApp = (): Application => {
   });
   app.use('/api', apiLimiter);
 
-  // API Routes
+  // Normalize request URLs (guard against double /api/api/)
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    if (req.url.startsWith('/api/api/')) {
+      req.url = req.url.replace(/^\/api\/api\//, '/api/');
+    }
+    next();
+  });
+
+  // Root welcome & status endpoint
+  app.get('/', (_req: Request, res: Response) => {
+    res.status(200).json({
+      success: true,
+      message: 'SupportFlow Backend API is running successfully',
+      version: '0.1.0',
+      environment: env.NODE_ENV,
+      healthCheck: '/api/health',
+    });
+  });
+
+  // API Routes (mounted with /api and aliases)
   app.use('/api/health', healthRoutes);
+  app.use('/health', healthRoutes);
+
   app.use('/api/auth', authRoutes);
+  app.use('/auth', authRoutes);
   app.use('/api/public/tickets', publicTicketRoutes);
   app.use('/api/tickets', staffTicketRoutes);
   app.use('/api/reports', reportRoutes);

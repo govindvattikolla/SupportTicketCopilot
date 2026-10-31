@@ -173,11 +173,32 @@ Review `backend/.env` to confirm your `MONGODB_URI`. If you are using local Mong
 MONGODB_URI=mongodb://127.0.0.1:27017/supportflow_dev
 ```
 
-### 3. Initialize & Seed Database
-Seed the database with the default workspace (`demo`), administrative roles, sample tickets, SLA schedules, and operational data:
+### 3. Initialize Workspace & Production Administrator
+SupportFlow is production-ready with zero dummy tickets and no pre-filled test credentials. Initialize your production workspace and administrator account using the secure bootstrap command:
+
 ```bash
-npm run seed
+# Windows PowerShell:
+$env:ADMIN_PASSWORD="YourSecurePassword123!"
+$env:ADMIN_EMAIL="admin@yourcompany.com"
+$env:ADMIN_WORKSPACE_NAME="Acme Customer Support"
+$env:ADMIN_WORKSPACE_SLUG="acme"
+npm run init:admin
+
+# Unix/Linux/macOS:
+ADMIN_PASSWORD="YourSecurePassword123!" \
+ADMIN_EMAIL="admin@yourcompany.com" \
+ADMIN_WORKSPACE_NAME="Acme Customer Support" \
+ADMIN_WORKSPACE_SLUG="acme" \
+npm run init:admin
 ```
+
+To purge any development test tickets or operational data at any time, run:
+```bash
+npm run db:clean
+```
+
+> [!NOTE]
+> The `seed.ts` script is strictly guarded against execution when `NODE_ENV=production`. In production, all workspaces start with zero tickets, zero dummy messages, and clean counters.
 
 ### 4. Start Development Servers
 Start both backend (port 5000) and frontend (port 5173) concurrently:
@@ -193,19 +214,13 @@ The application is now accessible:
 
 ---
 
-## Isolated Demo Credentials
+## Production Security & Staff Access
 
-> [!IMPORTANT]
-> The following demo credentials are provided **strictly for isolated, non-production evaluation**. Change all default passwords when provisioning production environments.
-
-| Role | Email Address | Password | Workspace Slug | Portal Access |
-| :--- | :--- | :--- | :--- | :--- |
-| **Workspace Admin** | `admin@supportflow.com` | `Password123!` | `demo` | Admin Dashboard, Reports, User Management, Audit Logs |
-| **Team Lead** | `lead@supportflow.com` | `Password123!` | `demo` | Workload Triage, Agent Consultations, Operational Intelligence |
-| **Support Agent (L1)**| `agent@supportflow.com` | `Password123!` | `demo` | Agent Inbox, Ticket Replies, Consultations |
-| **Technical Agent (L2)**| `jordan@supportflow.com` | `Password123!` | `demo` | Specialized Queue, Bug Investigation, Internal Notes |
-
-Fast-login pills for these accounts are available directly on the login screen (`/login`).
+SupportFlow enforces zero test logins and zero hardcoded credentials:
+- **No Test Logins / Fast-Login Pills**: The login interface contains zero test shortcuts, no default credentials, and no hardcoded demo accounts.
+- **Secure Manual Authentication**: Staff members sign in using their assigned `Workspace Slug`, `Email`, and `Password`.
+- **HTTP-Only Cookies**: Authentication tokens are strictly transmitted in `httpOnly`, `sameSite`, and `secure` cookies with automatic refresh token rotation. Zero tokens reside in `localStorage`.
+- **Granular Role Hierarchy**: Workspace permissions are enforced via `admin`, `lead`, and `agent` roles, protected both on API routes (`requireRole`) and client navigation guards (`RoleRoute`).
 
 ---
 
@@ -328,6 +343,49 @@ Run a dedicated worker instance (or scale independently from the API):
 - For multi-instance or serverless deployments, set `STORAGE_DRIVER=s3`.
 - Configure `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, and `S3_SECRET_KEY` using AWS S3 or Cloudflare R2.
 - Set bucket permissions to private; all client downloads are authenticated and proxied through SupportFlow API endpoints.
+
+---
+
+## Docker & Containerization
+
+SupportFlow includes complete Docker containerization support with optimized multi-stage production builds, Nginx reverse proxying, health checks, and Docker Compose orchestration.
+
+### Quick Start with Docker Compose
+
+```bash
+# Build and start all services in the background (Backend, Frontend, MongoDB, Redis)
+docker compose up --build -d
+
+# View status of running containers
+docker compose ps
+
+# Follow application logs
+docker compose logs -f
+
+# Stop all services and containers
+docker compose down
+```
+
+### Service Access & Ports
+
+| Service | Host URL | Description |
+|---|---|---|
+| **Frontend** | [http://localhost](http://localhost) (Port 80) | React SPA served by Nginx with reverse proxy to `/api` and `/socket.io` |
+| **Backend API** | [http://localhost:5000](http://localhost:5000) | Express REST API & Socket.IO server |
+| **Health Check** | [http://localhost:5000/api/health](http://localhost:5000/api/health) | API diagnostics & DB connectivity probe |
+| **MongoDB** | `localhost:27017` | Local MongoDB 7.0 database |
+| **Redis** | `localhost:6379` | Redis 7 cache & BullMQ background queue broker |
+
+### Customizing Environment Variables
+
+Copy `.env.docker.example` to `.env` in the root directory to customize any configuration:
+```bash
+cp .env.docker.example .env
+```
+To point SupportFlow to MongoDB Atlas instead of local Docker Mongo, set `MONGODB_URI` in `.env`:
+```env
+MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/supportflow?retryWrites=true&w=majority
+```
 
 ---
 

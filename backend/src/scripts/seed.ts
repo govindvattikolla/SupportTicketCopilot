@@ -12,6 +12,11 @@ import { Notification } from '../modules/notifications/notification.model';
 import { calculateInitialSLADeadlines, DEFAULT_SLA_SETTINGS } from '../modules/sla/slaEngine';
 
 export const seedDatabase = async () => {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ Refusing to seed demo data in a production environment.');
+    throw new Error('Seed script disabled in production');
+  }
+
   console.log('🌱 Starting database seed for SupportFlow...');
 
   await connectDatabase();

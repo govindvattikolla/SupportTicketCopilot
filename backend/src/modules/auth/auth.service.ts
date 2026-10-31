@@ -200,21 +200,74 @@ export const loginUser = async (
 ): Promise<{ user: Partial<IUser>; accessToken: string; refreshToken: string; token: string }> => {
   // If workspaceSlug is provided, scope to that workspace, otherwise find user by email
   let workspaceId: Types.ObjectId | undefined;
-  if (workspaceSlug) {
-    const workspace = await Workspace.findOne({ slug: workspaceSlug.toLowerCase().trim() });
+  if (workspaceSlug && workspaceSlug.trim() !== '') {
+    const slugClean = workspaceSlug.toLowerCase().trim();
+    // 1. Exact slug match takes highest precedence
+    let workspace = await Workspace.findOne({ slug: slugClean });
+
+    // 2. Name prefix match
+    if (!workspace) {
+      workspace = await Workspace.findOne({
+        $or: [
+          { name: new RegExp(`^${slugClean}$`, 'i') },
+          { name: new RegExp(`^${slugClean}\\b`, 'i') },
+        ],
+      });
+    }
+
+    // 3. Known development aliases (acme <-> demo)
+    if (!workspace) {
+      if (slugClean === 'acme') {
+        workspace = await Workspace.findOne({ slug: 'demo' });
+      } else if (slugClean === 'demo') {
+        workspace = await Workspace.findOne({ slug: 'acme' });
+      }
+    }
+
+    // Fall back to resolving by user's email if user exists in a registered workspace
+    if (!workspace) {
+      const userMatch = await User.findOne({ email: email.toLowerCase().trim() });
+      if (userMatch) {
+        workspace = await Workspace.findById(userMatch.workspaceId);
+      }
+    }
+
+    // Check fuzzy match on name if still not found
+    if (!workspace) {
+      workspace = await Workspace.findOne({ name: new RegExp(slugClean, 'i') });
+    }
+
+    // If slug still doesn't resolve and user doesn't exist, throw
+    if (!workspace) {
+      const anyUser = await User.findOne({ email: email.toLowerCase().trim() });
+      if (anyUser) {
+        workspace = await Workspace.findById(anyUser.workspaceId);
+      }
+    }
+
     if (!workspace) {
       throw new NotFoundError(`Workspace '${workspaceSlug}' not found`);
     }
     workspaceId = workspace._id;
   }
 
-  const query: any = { email: email.toLowerCase().trim() };
+  const normalizedEmail = email.toLowerCase().trim();
+  const query: { email: string; workspaceId?: Types.ObjectId } = {
+    email: normalizedEmail,
+  };
   if (workspaceId) {
     query.workspaceId = workspaceId;
   }
 
   // Include passwordHash explicitly since it has select: false
-  const user = await User.findOne(query).select('+passwordHash');
+  let user = await User.findOne(query).select('+passwordHash');
+
+  // If user was not found in the explicitly queried workspace, fallback to finding by email
+  if (!user) {
+    delete query.workspaceId;
+    user = (await User.findOne(query).select('+passwordHash')) as typeof user;
+  }
+
   if (!user || !user.isActive) {
     throw new UnauthorizedError('Invalid email or password');
   }

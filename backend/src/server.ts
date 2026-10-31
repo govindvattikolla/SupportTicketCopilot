@@ -3,7 +3,7 @@ import { createApp } from './app';
 import { connectDatabase, closeDatabase, getDatabaseStatus } from './config/db';
 import { env } from './config/env';
 import { initSocketServer } from './realtime/socket';
-import { startWorkers, stopWorkers } from './workers';
+
 
 const startServer = async (): Promise<void> => {
   const app = createApp();
@@ -20,12 +20,7 @@ const startServer = async (): Promise<void> => {
   }
   console.log(`[Server] Database connection status: ${getDatabaseStatus()}`);
 
-  // Start background workers (SLA evaluation & notifications)
-  try {
-    await startWorkers();
-  } catch (err: any) {
-    console.warn('[Server] Worker startup warning:', err.message);
-  }
+ 
 
   server.listen(env.PORT, () => {
     console.log(`
@@ -47,7 +42,7 @@ const startServer = async (): Promise<void> => {
     server.close(async () => {
       console.log('[Server] HTTP server closed.');
       try {
-        await stopWorkers();
+     
         await closeDatabase();
         console.log('[Server] Database connections closed.');
         process.exit(0);

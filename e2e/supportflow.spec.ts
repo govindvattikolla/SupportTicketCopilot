@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+let sharedTicketNumber = '';
+
 test.describe('SupportFlow E2E Operations & Security Workflow', () => {
   test('1. Customer Journey: Help desk navigation, ticket submission, Ticket ID generation, and tracking thread', async ({ page }) => {
     // Navigate to Help Center Home
@@ -39,6 +41,7 @@ test.describe('SupportFlow E2E Operations & Security Workflow', () => {
     await expect(ticketIdElement).toBeVisible();
     const ticketNumber = (await ticketIdElement.innerText()).trim();
     expect(ticketNumber).toMatch(/^TCK-\d+$/);
+    sharedTicketNumber = ticketNumber;
 
     // Click "Track Ticket" button to navigate to tracking page
     await page.click(`a:has-text("Track Ticket")`);
@@ -60,13 +63,14 @@ test.describe('SupportFlow E2E Operations & Security Workflow', () => {
   test('2. Public Tracker Security: Direct TCK lookup from Home page and invalid ID validation', async ({ page }) => {
     await page.goto('/');
 
-    // Lookup known ticket TCK-1008
+    // Lookup known ticket created in Test 1
     const searchInput = page.locator('input[placeholder*="Enter your ticket ID"]');
-    await searchInput.fill('TCK-1008');
+    const ticketToSearch = sharedTicketNumber || 'TCK-1001';
+    await searchInput.fill(ticketToSearch);
     await page.click('button:has-text("Track Ticket")');
 
-    await expect(page).toHaveURL(/\/track\/TCK-1008/);
-    await expect(page.locator('span:has-text("TCK-1008")').first()).toBeVisible({ timeout: 15000 });
+    await expect(page).toHaveURL(new RegExp(`/track/${ticketToSearch}`));
+    await expect(page.locator(`span:has-text("${ticketToSearch}")`).first()).toBeVisible({ timeout: 15000 });
 
     // Test invalid lookup
     await page.goto('/track/TCK-999999');
@@ -79,13 +83,16 @@ test.describe('SupportFlow E2E Operations & Security Workflow', () => {
     await expect(page.locator('h1')).toContainText(/Staff Portal Login/i);
 
     // Test failed authentication with invalid password
+    await page.fill('input[placeholder*="acme"]', 'demo');
     await page.fill('input[type="email"]', 'agent@supportflow.com');
     await page.fill('input[type="password"]', 'WrongPassword999!');
     await page.click('button:has-text("Sign In to Workspace")');
     await expect(page.locator('div.text-rose-300')).toBeVisible({ timeout: 10000 });
 
-    // Use pre-seeded demo button for Alex Agent
-    await page.click('button:has-text("Alex Agent")');
+    // Sign in manually with valid staff credentials (no demo buttons)
+    await page.fill('input[placeholder*="acme"]', 'demo');
+    await page.fill('input[type="email"]', 'agent@supportflow.com');
+    await page.fill('input[type="password"]', 'Password123!');
     await page.click('button:has-text("Sign In to Workspace")');
 
     // Assert redirected to Agent Dashboard
@@ -135,8 +142,10 @@ test.describe('SupportFlow E2E Operations & Security Workflow', () => {
     const postLogoutAccess = postLogoutCookies.find((c) => c.name === 'accessToken' && c.value !== '');
     expect(postLogoutAccess).toBeUndefined();
 
-    // Test Team Lead login using demo pill
-    await page.click('button:has-text("Taylor Lead")');
+    // Test Team Lead login using manual credentials
+    await page.fill('input[placeholder*="acme"]', 'demo');
+    await page.fill('input[type="email"]', 'lead@supportflow.com');
+    await page.fill('input[type="password"]', 'Password123!');
     await page.click('button:has-text("Sign In to Workspace")');
 
     // Assert redirected to Lead Dashboard

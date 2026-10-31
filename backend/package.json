@@ -11,6 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx src/scripts/seed.ts",
+    "db:clean": "tsx src/scripts/cleanSeed.ts",
+    "init:admin": "tsx src/scripts/initAdmin.ts",
     "worker": "tsx src/workers/index.ts",
     "lint": "tsc --noEmit"
   },

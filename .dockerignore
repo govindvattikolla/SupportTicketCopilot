@@ -1,0 +1,19 @@
+node_modules
+**/node_modules
+.git
+.gitignore
+.vscode
+dist
+**/dist
+coverage
+playwright-report
+test-results
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files with secrets (keep .env.example)
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.docker.example

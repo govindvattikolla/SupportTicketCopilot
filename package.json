@@ -15,8 +15,14 @@
     "test": "npm run test --workspace=backend",
     "test:e2e": "playwright test",
     "seed": "npm run seed --workspace=backend",
+    "db:clean": "npm run db:clean --workspace=backend",
+    "init:admin": "npm run init:admin --workspace=backend",
     "typecheck": "npm run typecheck --workspace=backend && npm run typecheck --workspace=frontend",
-    "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend"
+    "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
   },
   "keywords": [
     "support-flow",

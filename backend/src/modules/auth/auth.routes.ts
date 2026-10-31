@@ -23,6 +23,12 @@ const authRateLimiter = rateLimit({
 
 // Public auth endpoints
 router.post('/login', authRateLimiter, asyncHandler(login));
+router.get('/login', (_req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'SupportFlow Auth Login Endpoint is ready. To log in with your credentials, use HTTP POST or open the web interface at http://localhost/login.',
+  });
+});
 router.post('/refresh', asyncHandler(refresh));
 router.post('/logout', asyncHandler(logout));
 

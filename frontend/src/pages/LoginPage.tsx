@@ -7,9 +7,9 @@ export const LoginPage: React.FC = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState('agent@supportflow.com');
-  const [password, setPassword] = useState('Password123!');
-  const [workspaceSlug, setWorkspaceSlug] = useState('demo');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [workspaceSlug, setWorkspaceSlug] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -34,12 +34,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleFillCredentials = (role: 'admin' | 'agent' | 'lead') => {
-    setEmail(`${role}@supportflow.com`);
-    setPassword('Password123!');
-    setWorkspaceSlug('demo');
-  };
-
   return (
     <div className="max-w-md mx-auto px-6 py-16">
       <div className="text-center mb-8">
@@ -62,17 +56,19 @@ export const LoginPage: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              Workspace Slug
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-semibold text-slate-300">
+                Workspace Slug
+              </label>
+              <span className="text-[10px] text-slate-400">Optional</span>
+            </div>
             <div className="relative">
               <Building className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
               <input
                 type="text"
-                required
                 value={workspaceSlug}
                 onChange={(e) => setWorkspaceSlug(e.target.value)}
-                placeholder="e.g. demo"
+                placeholder="acme or demo"
                 className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
               />
             </div>
@@ -89,7 +85,7 @@ export const LoginPage: React.FC = () => {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="agent@supportflow.com"
+                placeholder="name@company.com"
                 className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
               />
             </div>
@@ -121,39 +117,6 @@ export const LoginPage: React.FC = () => {
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>
-
-        {/* Demo Fast-Login Pills */}
-        <div className="mt-6 pt-5 border-t border-slate-700/60">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-            Demo Credentials (Pre-seeded):
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => handleFillCredentials('agent')}
-              className="px-2.5 py-1 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition"
-            >
-              Alex Agent
-            </button>
-            <button
-              type="button"
-              onClick={() => handleFillCredentials('lead')}
-              className="px-2.5 py-1 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition"
-            >
-              Taylor Lead
-            </button>
-            <button
-              type="button"
-              onClick={() => handleFillCredentials('admin')}
-              className="px-2.5 py-1 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition"
-            >
-              Sarah Admin
-            </button>
-          </div>
-          <p className="text-[10px] text-slate-500 mt-2">
-            Password: <code className="text-brand-300">Password123!</code> • Workspace: <code className="text-brand-300">demo</code>
-          </p>
-        </div>
       </div>
     </div>
   );
